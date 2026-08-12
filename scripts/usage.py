@@ -1,153 +1,109 @@
 #!/usr/bin/env python3
-"""Turn-level token/credit ledger and reporting for Agent Dispatch.
-
-Credit derivation uses a local, editable Codex rate card. Token counts are never
-invented: pass measured counts when the runtime exposes them, estimated counts
-only when you have a defensible estimate, or use the explicitly rough
-message-average fallback.
-"""
+"""Per-subagent, turn, and aggregate token/credit accounting for Agent Dispatch."""
 from __future__ import annotations
 import argparse, datetime as dt, json, os
 from collections import defaultdict
 from pathlib import Path
-
-SCHEMA=1
+SCHEMA=2
 RATE_CARD_AS_OF="2026-08-12"
 RATE_CARD_SOURCE="https://help.openai.com/en/articles/20001106-codex-rate-card"
-# Credits per 1M tokens. rough_local_message is a planning fallback only.
 DEFAULT_RATES={
- "gpt-5.6-sol":{"input":125.0,"cached_input":12.5,"output":750.0,"rough_local_message":14.0},
- "sol":{"input":125.0,"cached_input":12.5,"output":750.0,"rough_local_message":14.0},
- "gpt-5.6-terra":{"input":62.5,"cached_input":6.25,"output":375.0,"rough_local_message":7.0},
- "terra":{"input":62.5,"cached_input":6.25,"output":375.0,"rough_local_message":7.0},
- "gpt-5.6-luna":{"input":25.0,"cached_input":2.5,"output":150.0,"rough_local_message":3.0},
- "luna":{"input":25.0,"cached_input":2.5,"output":150.0,"rough_local_message":3.0},
- "gpt-5.5":{"input":125.0,"cached_input":12.5,"output":750.0,"rough_local_message":14.0},
- "gpt-5.4":{"input":62.5,"cached_input":6.25,"output":375.0,"rough_local_message":7.0},
- "gpt-5.4-mini":{"input":18.75,"cached_input":1.875,"output":113.0},
- "gpt-5.3-codex":{"input":43.75,"cached_input":4.375,"output":350.0},
- "gpt-5.2":{"input":43.75,"cached_input":4.375,"output":350.0},
- # GPT-5.3-Codex-Spark is research preview; no public numeric rate as of RATE_CARD_AS_OF.
+ "gpt-5.6-sol":{"input":125.,"cached_input":12.5,"output":750.,"rough_local_message":14.},"sol":{"input":125.,"cached_input":12.5,"output":750.,"rough_local_message":14.},
+ "gpt-5.6-terra":{"input":62.5,"cached_input":6.25,"output":375.,"rough_local_message":7.},"terra":{"input":62.5,"cached_input":6.25,"output":375.,"rough_local_message":7.},
+ "gpt-5.6-luna":{"input":25.,"cached_input":2.5,"output":150.,"rough_local_message":3.},"luna":{"input":25.,"cached_input":2.5,"output":150.,"rough_local_message":3.},
+ "gpt-5.5":{"input":125.,"cached_input":12.5,"output":750.,"rough_local_message":14.},"gpt-5.4":{"input":62.5,"cached_input":6.25,"output":375.,"rough_local_message":7.},
+ "gpt-5.4-mini":{"input":18.75,"cached_input":1.875,"output":113.},"gpt-5.3-codex":{"input":43.75,"cached_input":4.375,"output":350.},"gpt-5.2":{"input":43.75,"cached_input":4.375,"output":350.}
 }
-
-def now_iso():return dt.datetime.now(dt.timezone.utc).isoformat()
-def home():
- if os.environ.get("AGENT_DISPATCH_HOME"):return Path(os.environ["AGENT_DISPATCH_HOME"]).expanduser()
- return Path(os.environ.get("CODEX_HOME",Path.home()/".codex")).expanduser()/"agent-dispatch"
-def telemetry_path():return home()/"telemetry.jsonl"
-def rate_path():return home()/"rate-card.json"
-def init_rates():
- p=rate_path();p.parent.mkdir(parents=True,exist_ok=True)
- if not p.exists():p.write_text(json.dumps({"schema":SCHEMA,"as_of":RATE_CARD_AS_OF,"source":RATE_CARD_SOURCE,"rates":DEFAULT_RATES},indent=2,sort_keys=True)+"\n")
+def now():return dt.datetime.now(dt.timezone.utc).isoformat()
+def home():return Path(os.environ.get("AGENT_DISPATCH_HOME",Path(os.environ.get("CODEX_HOME",Path.home()/".codex"))/"agent-dispatch")).expanduser()
+def tp():return home()/"telemetry.jsonl"
+def rp():return home()/"rate-card.json"
 def rates():
- init_rates()
- try:return json.loads(rate_path().read_text())
- except json.JSONDecodeError as e:raise SystemExit(f"Invalid rate card {rate_path()}: {e}")
-def load_events():
- p=telemetry_path()
- if not p.exists():return []
+ p=rp();p.parent.mkdir(parents=True,exist_ok=True)
+ if not p.exists():p.write_text(json.dumps({"schema":SCHEMA,"as_of":RATE_CARD_AS_OF,"source":RATE_CARD_SOURCE,"rates":DEFAULT_RATES},indent=2,sort_keys=True)+"\n")
+ return json.loads(p.read_text())
+def events():
+ if not tp().exists():return []
  out=[]
- for line in p.read_text().splitlines():
-  try:out.append(json.loads(line))
+ for l in tp().read_text().splitlines():
+  try:out.append(json.loads(l))
   except json.JSONDecodeError:pass
  return out
 def append(e):
- p=telemetry_path();p.parent.mkdir(parents=True,exist_ok=True)
+ p=tp();p.parent.mkdir(parents=True,exist_ok=True)
  with p.open("a") as f:f.write(json.dumps(e,sort_keys=True)+"\n")
-def norm_model(m):return (m or "").strip().lower()
-def credit_for(model,inp,cached,out,card):
- r=card.get("rates",{}).get(norm_model(model))
- if not r:return None
- return (inp*r["input"]+cached*r["cached_input"]+out*r["output"])/1_000_000
+def norm(x):return (x or "").strip().lower()
+def credit(model,i,c,o,card):
+ r=card.get("rates",{}).get(norm(model));return None if not r else (i*r["input"]+c*r["cached_input"]+o*r["output"])/1e6
 def parse_usage(s):
- # model,input,cached_input,output,source ; source=measured|estimated
+ # agent_id,role,model,effort,input,cached,output,source
  p=[x.strip() for x in s.split(",")]
- if len(p)!=5:raise argparse.ArgumentTypeError("usage must be model,input,cached_input,output,measured|estimated")
- if p[4] not in {"measured","estimated"}:raise argparse.ArgumentTypeError("usage source must be measured or estimated")
- try:i,c,o=map(int,p[1:4])
- except ValueError:raise argparse.ArgumentTypeError("token counts must be integers")
- if min(i,c,o)<0:raise argparse.ArgumentTypeError("token counts must be nonnegative")
- return {"model":p[0],"input_tokens":i,"cached_input_tokens":c,"output_tokens":o,"token_source":p[4]}
+ if len(p)!=8:raise argparse.ArgumentTypeError("usage must be agent_id,role,model,effort,input,cached_input,output,measured|estimated")
+ if p[7] not in {"measured","estimated"}:raise argparse.ArgumentTypeError("source must be measured or estimated")
+ try:i,c,o=map(int,p[4:7])
+ except:raise argparse.ArgumentTypeError("token counts must be integers")
+ return {"agent_id":p[0],"role":p[1],"model":p[2],"effort":p[3],"input_tokens":i,"cached_input_tokens":c,"output_tokens":o,"token_source":p[7]}
 def parse_message(s):
  p=[x.strip() for x in s.split(",")]
- if len(p) not in {1,2}:raise argparse.ArgumentTypeError("message must be model or model,count")
- try:n=int(p[1]) if len(p)==2 else 1
- except ValueError:raise argparse.ArgumentTypeError("message count must be an integer")
- if n<1:raise argparse.ArgumentTypeError("message count must be positive")
- return {"model":p[0],"count":n}
+ if len(p) not in {4,5}:raise argparse.ArgumentTypeError("message must be agent_id,role,model,effort[,count]")
+ return {"agent_id":p[0],"role":p[1],"model":p[2],"effort":p[3],"count":int(p[4]) if len(p)==5 else 1}
+def baseline_component(x,card,model="gpt-5.6-sol",mult=1.0):
+ i=round(x["input_tokens"]*mult);c=round(x["cached_input_tokens"]*mult);o=round(x["output_tokens"]*mult)
+ return credit(model,i,c,o,card)
 def record(a):
- card=rates();components=[];token_total=0;credits_known=0.0;credits_complete=True
+ card=rates();comps=[];actual_known=0.;actual_complete=True;base_known=0.;base_complete=True;tok=0
  for u in a.usage or []:
-  x=dict(u);cr=credit_for(x["model"],x["input_tokens"],x["cached_input_tokens"],x["output_tokens"],card);x["derived_credits"]=cr
-  token_total+=x["input_tokens"]+x["cached_input_tokens"]+x["output_tokens"]
-  if cr is None:credits_complete=False
-  else:credits_known+=cr
-  components.append(x)
- rough=0.0;rough_complete=True
+  x=dict(u);x["derived_credits"]=credit(x["model"],x["input_tokens"],x["cached_input_tokens"],x["output_tokens"],card);x["sol_max_same_token_credits"]=baseline_component(x,card,a.baseline_model,a.baseline_token_multiplier)
+  tok+=x["input_tokens"]+x["cached_input_tokens"]+x["output_tokens"]
+  if x["derived_credits"] is None:actual_complete=False
+  else:actual_known+=x["derived_credits"]
+  if x["sol_max_same_token_credits"] is None:base_complete=False
+  else:base_known+=x["sol_max_same_token_credits"]
+  comps.append(x)
  for m in a.message or []:
-  r=card.get("rates",{}).get(norm_model(m["model"]));avg=r.get("rough_local_message") if r else None
-  c=None if avg is None else avg*m["count"]
-  if c is None:rough_complete=False
-  else:rough+=c
-  components.append({"model":m["model"],"message_count":m["count"],"credit_source":"rough_legacy_message_average","derived_credits":c})
- if a.measured_credits is not None:credit_total=a.measured_credits;credit_source="measured"
- elif (a.usage and credits_complete):credit_total=credits_known;credit_source="derived_from_token_rate_card"
- elif (not a.usage and a.message and rough_complete):credit_total=rough;credit_source="rough_message_average"
- else:credit_total=None;credit_source="partial_or_unknown"
- sources={x.get("token_source") for x in components if x.get("token_source")}
- token_source="measured" if sources=={"measured"} else ("estimated" if sources=={"estimated"} else ("mixed" if sources else "unknown"))
- e={"schema":SCHEMA,"timestamp":a.timestamp or now_iso(),"event":"turn_usage","turn_id":a.turn_id,"run_id":a.run_id,"project":a.project,
-    "front_door_model":a.front_door_model,"front_door_effort":a.front_door_effort,"components":components,"token_total":token_total if a.usage else None,
-    "token_source":token_source,"credit_total":credit_total,"credit_source":credit_source,"rate_card_as_of":card.get("as_of"),"notes":a.notes}
+  r=card.get("rates",{}).get(norm(m["model"]));v=None if not r or r.get("rough_local_message") is None else r["rough_local_message"]*m["count"]
+  comps.append({**m,"credit_source":"rough_message_average","derived_credits":v});actual_complete=False;base_complete=False
+ actual=a.measured_credits if a.measured_credits is not None else (actual_known if a.usage and actual_complete else None)
+ actual_source="measured" if a.measured_credits is not None else ("derived_from_token_rate_card" if actual is not None else "partial_or_unknown")
+ baseline=base_known if a.usage and base_complete else None
+ savings=None if actual is None or baseline is None else baseline-actual;savings_pct=None if savings is None or not baseline else 100*savings/baseline
+ src={x.get("token_source") for x in comps if x.get("token_source")};token_source="measured" if src=={"measured"} else ("estimated" if src=={"estimated"} else ("mixed" if src else "unknown"))
+ e={"schema":SCHEMA,"timestamp":a.timestamp or now(),"event":"turn_usage","turn_id":a.turn_id,"run_id":a.run_id,"project":a.project,"front_door_model":a.front_door_model,"front_door_effort":a.front_door_effort,
+ "components":comps,"token_total":tok if a.usage else None,"token_source":token_source,"credit_total":actual,"credit_source":actual_source,"baseline":{"model":a.baseline_model,"effort":"max","token_multiplier":a.baseline_token_multiplier,"method":"same-token-mix rate counterfactual"},"baseline_credits":baseline,"estimated_credit_savings":savings,"estimated_savings_pct":savings_pct,"rate_card_as_of":card.get("as_of"),"notes":a.notes}
  e={k:v for k,v in e.items() if v is not None};append(e);print(json.dumps(e,indent=2,sort_keys=True))
-def latest_turn(turn_id=None):
- xs=[e for e in load_events() if e.get("event")=="turn_usage" and (not turn_id or e.get("turn_id")==turn_id)]
- return xs[-1] if xs else None
-def fmt_num(n):
- if n is None:return "unknown"
- if n>=1_000_000:return f"{n/1_000_000:.2f}M"
- if n>=1000:return f"{n/1000:.1f}k"
- return str(int(n))
-def footer(a):
- e=latest_turn(a.turn_id)
- if not e:raise SystemExit("No matching turn usage event")
- cr=e.get("credit_total");cs=e.get("credit_source","unknown");tok=e.get("token_total");ts=e.get("token_source","unknown")
- ctext="unknown credits" if cr is None else f"{cr:.2f} credits"
- if cs!="measured" and cr is not None:ctext="~"+ctext
- ttext=f"{fmt_num(tok)} tokens ({ts})" if tok is not None else "tokens unknown"
- print(f"Agent Dispatch usage — {ctext} [{cs}]; {ttext}.")
-def report(a):
- xs=[e for e in load_events() if e.get("event")=="turn_usage"]
- if a.project:xs=[e for e in xs if e.get("project")==a.project]
- if a.days:
+def filtered(a):
+ xs=[e for e in events() if e.get("event")=="turn_usage"]
+ if getattr(a,"project",None):xs=[e for e in xs if e.get("project")==a.project]
+ if getattr(a,"days",None):
   cut=dt.datetime.now(dt.timezone.utc)-dt.timedelta(days=a.days)
-  def recent(e):
-   try:return dt.datetime.fromisoformat(str(e.get("timestamp","")).replace("Z","+00:00"))>=cut
-   except:return False
-  xs=[e for e in xs if recent(e)]
- groups=defaultdict(list)
+  xs=[e for e in xs if dt.datetime.fromisoformat(e["timestamp"].replace("Z","+00:00"))>=cut]
+ return xs
+def summarize(xs):
+ agents=defaultdict(lambda:{"turns":set(),"input":0,"cached":0,"output":0,"credits":0.,"credits_complete":True,"baseline":0.,"baseline_complete":True})
  for e in xs:
-  key=e.get("front_door_model") or "unknown";eff=e.get("front_door_effort")
-  if eff:key+=f"/{eff}"
-  groups[key].append(e)
+  for x in e.get("components",[]):
+   if "input_tokens" not in x:continue
+   k=f'{x.get("agent_id","unknown")}:{x.get("role","worker")}:{x.get("model","unknown")}/{x.get("effort","unknown")}' ;d=agents[k];d["turns"].add(e.get("turn_id"));d["input"]+=x["input_tokens"];d["cached"]+=x["cached_input_tokens"];d["output"]+=x["output_tokens"]
+   if x.get("derived_credits") is None:d["credits_complete"]=False
+   else:d["credits"]+=x["derived_credits"]
+   if x.get("sol_max_same_token_credits") is None:d["baseline_complete"]=False
+   else:d["baseline"]+=x["sol_max_same_token_credits"]
  rows=[]
- for k,v in sorted(groups.items()):
-  known=[e["credit_total"] for e in v if e.get("credit_total") is not None];tokens=[e["token_total"] for e in v if e.get("token_total") is not None]
-  rows.append({"front_door":k,"turns":len(v),"credits_known_sum":round(sum(known),3) if known else None,"turns_with_credit_estimate":len(known),
-               "tokens_known_sum":sum(tokens) if tokens else None,"turns_with_tokens":len(tokens),"credit_sources":dict(_counts(e.get("credit_source","unknown") for e in v)),
-               "token_sources":dict(_counts(e.get("token_source","unknown") for e in v))})
- allc=[e["credit_total"] for e in xs if e.get("credit_total") is not None];allt=[e["token_total"] for e in xs if e.get("token_total") is not None]
- print(json.dumps({"turns":len(xs),"credits_known_sum":round(sum(allc),3) if allc else None,"tokens_known_sum":sum(allt) if allt else None,"front_doors":rows},indent=2,sort_keys=True))
-def _counts(it):
- d=defaultdict(int)
- for x in it:d[x]+=1
- return d.items()
+ for k,d in sorted(agents.items()):
+  rows.append({"subagent_route":k,"turns":len(d["turns"]),"input_tokens":d["input"],"cached_input_tokens":d["cached"],"output_tokens":d["output"],"total_tokens":d["input"]+d["cached"]+d["output"],"credits":round(d["credits"],3) if d["credits_complete"] else None,"sol_max_same_token_credits":round(d["baseline"],3) if d["baseline_complete"] else None})
+ ac=[e["credit_total"] for e in xs if e.get("credit_total") is not None];bc=[e["baseline_credits"] for e in xs if e.get("baseline_credits") is not None];all_complete=len(ac)==len(xs) and len(bc)==len(xs);actual=sum(ac) if all_complete else None;base=sum(bc) if all_complete else None
+ return {"turns":len(xs),"actual_credits":round(actual,3) if actual is not None else None,"sol_max_same_token_credits":round(base,3) if base is not None else None,"estimated_credit_savings":round(base-actual,3) if actual is not None and base is not None else None,"estimated_savings_pct":round(100*(base-actual)/base,2) if actual is not None and base else None,"by_subagent_model_effort":rows}
+def report(a):print(json.dumps(summarize(filtered(a)),indent=2,sort_keys=True))
+def footer(a):
+ xs=filtered(a);xs=[e for e in xs if not a.turn_id or e.get("turn_id")==a.turn_id]
+ if not xs:raise SystemExit("No matching turn usage")
+ s=summarize([xs[-1]]);actual=s["actual_credits"];base=s["sol_max_same_token_credits"];save=s["estimated_credit_savings"];pct=s["estimated_savings_pct"]
+ actual_txt="unknown" if actual is None else f"{actual:.2f}";base_txt="unknown" if base is None else f"~{base:.2f}";save_txt="unknown" if save is None else f"~{save:.2f} ({pct:.1f}%)"
+ routes=", ".join(f'{r["subagent_route"]} {r["total_tokens"]:,}t/{r["credits"] if r["credits"] is not None else "?"}cr' for r in s["by_subagent_model_effort"])
+ print(f"Agent Dispatch usage — actual {actual_txt} cr; Sol/max same-token baseline {base_txt} cr; estimated savings {save_txt}. {routes}")
 def show_rates(_):print(json.dumps(rates(),indent=2,sort_keys=True))
 def parser():
- p=argparse.ArgumentParser(description=__doc__);s=p.add_subparsers(dest="cmd",required=True)
- r=s.add_parser("record-turn");r.add_argument("--turn-id",required=True);r.add_argument("--run-id");r.add_argument("--project");r.add_argument("--front-door-model");r.add_argument("--front-door-effort");r.add_argument("--usage",action="append",type=parse_usage,help="model,input,cached_input,output,measured|estimated; repeat per model");r.add_argument("--message",action="append",type=parse_message,help="rough fallback: model[,count]");r.add_argument("--measured-credits",type=float);r.add_argument("--timestamp");r.add_argument("--notes");r.set_defaults(func=record)
- f=s.add_parser("footer");f.add_argument("--turn-id");f.set_defaults(func=footer)
- q=s.add_parser("report");q.add_argument("--project");q.add_argument("--days",type=int);q.set_defaults(func=report)
- s.add_parser("show-rates").set_defaults(func=show_rates)
- return p
+ p=argparse.ArgumentParser(description=__doc__);s=p.add_subparsers(dest="cmd",required=True);r=s.add_parser("record-turn");r.add_argument("--turn-id",required=True);r.add_argument("--run-id");r.add_argument("--project");r.add_argument("--front-door-model");r.add_argument("--front-door-effort");r.add_argument("--usage",action="append",type=parse_usage);r.add_argument("--message",action="append",type=parse_message);r.add_argument("--measured-credits",type=float);r.add_argument("--baseline-model",default="gpt-5.6-sol");r.add_argument("--baseline-token-multiplier",type=float,default=1.0);r.add_argument("--timestamp");r.add_argument("--notes");r.set_defaults(func=record)
+ f=s.add_parser("footer");f.add_argument("--turn-id");f.add_argument("--project");f.add_argument("--days",type=int);f.set_defaults(func=footer)
+ q=s.add_parser("report");q.add_argument("--project");q.add_argument("--days",type=int);q.set_defaults(func=report);s.add_parser("show-rates").set_defaults(func=show_rates);return p
 if __name__=="__main__":a=parser().parse_args();a.func(a)
