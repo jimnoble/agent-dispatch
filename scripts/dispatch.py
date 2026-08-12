@@ -92,7 +92,7 @@ def maybe_tune():
 def record_task(a):
     e={"schema":SCHEMA,"timestamp":a.timestamp or now_iso(),"event":"delegated_task","task_id":a.task_id,
        "run_id":a.run_id,"parent_task_id":a.parent_task_id,"project":a.project,"task_class":a.task_class,"domain":a.domain,
-       "front_door_model":a.front_door_model,"front_door_reasoning":a.front_door_reasoning,
+       "front_door_model":a.front_door_model,"front_door_revision":a.front_door_revision,"front_door_reasoning":a.front_door_reasoning,
        "worker_model":a.worker_model,"worker_revision":a.worker_revision,"worker_reasoning":a.worker_reasoning,"tier":a.tier,
        "delegation_depth":a.delegation_depth,"parallel":a.parallel,"parallel_group_size":a.parallel_group_size,
        "parallel_collision":a.parallel_collision,"write_class":a.write_class,"shadow":a.shadow,
@@ -103,7 +103,7 @@ def record_task(a):
     print(json.dumps(append_event(e),indent=2,sort_keys=True)); maybe_tune()
 def record_run(a):
     e={"schema":SCHEMA,"timestamp":a.timestamp or now_iso(),"event":"run_summary","run_id":a.run_id,"project":a.project,
-       "front_door_model":a.front_door_model,"front_door_reasoning":a.front_door_reasoning,
+       "front_door_model":a.front_door_model,"front_door_revision":a.front_door_revision,"front_door_reasoning":a.front_door_reasoning,
        "duration_s":a.duration_s,"input_tokens":a.input_tokens,"output_tokens":a.output_tokens,"usage_source":a.usage_source,
        "frontier_calls":a.frontier_calls,"frontier_tokens":a.frontier_tokens,"delegated_tasks":a.delegated_tasks,
        "max_parallelism":a.max_parallelism,"rework":a.rework,"accepted":a.accepted,"tests_pass":a.tests_pass,
@@ -138,7 +138,7 @@ def tune_internal():
     for e in evs:
         w=age_weight(e.get("timestamp"),cfg["half_life_days"])
         for p,d in ((e.get("project") or "*",e.get("domain") or "*"),(e.get("project") or "*","*"),("*",e.get("domain") or "*"),("*","*")):
-            buckets["|".join([p,e.get("task_class","unknown"),d])].append((e,w))
+            buckets["|".join([p,e.get("task_class","unknown"),d,e.get("write_class") or "*"])].append((e,w))
     for k,rows in buckets.items():
         m=aggregate_rows(rows,cfg); esc_rate=sum(1 for e,_ in rows if int(e.get("escalations",0) or 0)>0)/max(1,len(rows))
         retry_budget=0 if esc_rate>.45 else (1 if esc_rate>.15 else 2); escalation_after=1 if esc_rate>.25 else 2
@@ -167,11 +167,13 @@ def route_candidates(a,state,cfg):
         out.append({"model":model,"revision":rev,"reasoning":reason,"skill_version":skillver,"specificity":specificity,**m})
     return sorted(out,key=lambda x:(x["specificity"],x["utility"],x["clean_success_rate"]),reverse=True)
 def policy_for(a,state,cfg):
-    keys=[]
-    if a.project and a.domain:keys.append(f"{a.project}|{a.task_class}|{a.domain}")
-    if a.project:keys.append(f"{a.project}|{a.task_class}|*")
-    if a.domain:keys.append(f"*|{a.task_class}|{a.domain}")
-    keys.append(f"*|{a.task_class}|*")
+    keys=[]; wc=a.write_class or "*"
+    if a.project and a.domain:keys.append(f"{a.project}|{a.task_class}|{a.domain}|{wc}")
+    if a.project and a.domain and wc!="*":keys.append(f"{a.project}|{a.task_class}|{a.domain}|*")
+    if a.project:keys.append(f"{a.project}|{a.task_class}|*|{wc}")
+    if a.domain:keys.append(f"*|{a.task_class}|{a.domain}|{wc}")
+    keys.append(f"*|{a.task_class}|*|{wc}")
+    if wc!="*":keys.append(f"*|{a.task_class}|*|*")
     for k in keys:
         p=state.get("policies",{}).get(k)
         if p and p.get("samples",0)>=cfg["min_samples"]:return k,p
@@ -190,7 +192,7 @@ def recommend(a):
         if others:alt=min(others,key=lambda x:x["samples"])
     result={"task_class":a.task_class,"domain":a.domain,"project":a.project,"default_tier":prior,"learned_override":learned,
             "recommendation":rec,"policy_source":pk,"execution_policy":pol,
-            "exploration":{"rate":cfg["exploration_rate"],"eligible":prior!="frontier","candidate":alt["model"] if alt else None,"mode":"shadow" if prior=="frontier" else "controlled"},
+            "exploration":{"rate":cfg["exploration_rate"],"direct_control_eligible":prior!="frontier","shadow_eligible":True,"candidate":alt["model"] if alt else None,"mode":"shadow" if prior=="frontier" else "controlled"},
             "recursive_delegation":{"max_depth":cfg["max_recursive_depth"],"remaining_depth":max(0,cfg["max_recursive_depth"]-(a.delegation_depth or 0))}}
     if prior=="frontier":result["frontier_consultation"]="Prefer plan/consult/adjudicate; use subtree only when frontier-heavy ownership is genuinely cheaper than repeated consultation."
     print(json.dumps(result,indent=2,sort_keys=True))
@@ -204,7 +206,9 @@ def report(a):
             except:return False
         tasks=[e for e in tasks if recent(e)];runs=[e for e in runs if recent(e)]
     by=defaultdict(list); source=runs if runs else tasks
-    for e in source:by[f"{e.get('front_door_model','unknown')}/{e.get('front_door_reasoning','')}".rstrip("/")].append(e)
+    for e in source:
+        parts=[str(e.get("front_door_model") or "unknown"),str(e.get("front_door_revision") or ""),str(e.get("front_door_reasoning") or ""),str(e.get("skill_version") or "")]
+        by["/".join(x for x in parts if x)].append(e)
     rows=[]
     for front,items in by.items():
         n=len(items);acc=sum(1 for e in items if clean_success(e))/n;rew=sum(1 for e in items if e.get("rework") is True)/n
@@ -212,10 +216,11 @@ def report(a):
         tok=[int(e.get("input_tokens",0) or 0)+int(e.get("output_tokens",0) or 0) for e in items if e.get("usage_source")=="measured"]
         rows.append({"front_door":front,"runs" if runs else "delegated_tasks":n,"clean_success_rate":round(acc,4),"rework_rate":round(rew,4),
                      "frontier_calls_per_run":round(ft/n,3) if runs else None,"median_duration_s":statistics.median(d) if d else None,"measured_tokens_sum":sum(tok) if tok else None})
-    frontier=defaultdict(int)
+    frontier=defaultdict(int);frontier_tokens=0
     for e in tasks:
-        if e.get("tier")=="frontier":frontier[e.get("frontier_use","unknown")]+=1
-    print(json.dumps({"run_events":len(runs),"delegated_task_events":len(tasks),"basis":"run_summary" if runs else "delegated_task_fallback","front_doors":rows,"frontier_use":dict(frontier)},indent=2,sort_keys=True))
+        if e.get("tier")=="frontier" or int(e.get("frontier_calls",0) or 0)>0:frontier[e.get("frontier_use","unknown")]+=max(1,int(e.get("frontier_calls",0) or 0))
+    for e in runs:frontier_tokens+=int(e.get("frontier_tokens",0) or 0)
+    print(json.dumps({"run_events":len(runs),"delegated_task_events":len(tasks),"basis":"run_summary" if runs else "delegated_task_fallback","front_doors":rows,"frontier_use":dict(frontier),"frontier_tokens_sum":frontier_tokens or None},indent=2,sort_keys=True))
 def reset(a):
     t,r,c=paths()
     if a.learned_only:
@@ -227,20 +232,20 @@ def reset(a):
 def parser():
     p=argparse.ArgumentParser(description=__doc__);s=p.add_subparsers(dest="cmd",required=True);s.add_parser("init").set_defaults(func=lambda a:init_state())
     r=s.add_parser("record")
-    for x,req in (("task-id",True),("run-id",False),("parent-task-id",False),("project",False),("task-class",True),("domain",False),("front-door-model",False),("front-door-reasoning",False),("worker-model",False),("worker-revision",False),("worker-reasoning",False),("skill-version",False),("notes",False),("timestamp",False)):r.add_argument("--"+x,required=req)
+    for x,req in (("task-id",True),("run-id",False),("parent-task-id",False),("project",False),("task-class",True),("domain",False),("front-door-model",False),("front-door-revision",False),("front-door-reasoning",False),("worker-model",False),("worker-revision",False),("worker-reasoning",False),("skill-version",False),("notes",False),("timestamp",False)):r.add_argument("--"+x,required=req)
     r.add_argument("--tier",choices=TIERS,required=True);r.add_argument("--delegation-depth",type=int,default=0)
     for x in ("parallel","parallel-collision","shadow","review-pass","tests-pass","rework","accepted"):r.add_argument("--"+x,type=boolish)
     r.add_argument("--parallel-group-size",type=int);r.add_argument("--write-class",choices=["read_only","write_isolated","write_shared"]);r.add_argument("--consultation-mode",choices=["plan","consult","subtree","adjudicate"])
     r.add_argument("--frontier-use",choices=["necessary","rescue","avoidable","unknown"]);r.add_argument("--frontier-calls",type=int,default=0);r.add_argument("--duration-s",type=float);r.add_argument("--input-tokens",type=int);r.add_argument("--output-tokens",type=int)
     r.add_argument("--usage-source",choices=["measured","derived","unknown"],default="unknown");r.add_argument("--retries",type=int,default=0);r.add_argument("--escalations",type=int,default=0);r.add_argument("--outcome",choices=["pass","partial","blocked","fail"]);r.set_defaults(func=record_task)
     rr=s.add_parser("record-run")
-    for x,req in (("run-id",True),("project",False),("front-door-model",False),("front-door-reasoning",False),("skill-version",False),("notes",False),("timestamp",False)):rr.add_argument("--"+x,required=req)
+    for x,req in (("run-id",True),("project",False),("front-door-model",False),("front-door-revision",False),("front-door-reasoning",False),("skill-version",False),("notes",False),("timestamp",False)):rr.add_argument("--"+x,required=req)
     for x in ("rework","accepted","tests-pass","review-pass"):rr.add_argument("--"+x,type=boolish)
     for x in ("frontier-calls","frontier-tokens","delegated-tasks","max-parallelism","input-tokens","output-tokens"):rr.add_argument("--"+x,type=int)
     rr.add_argument("--duration-s",type=float);rr.add_argument("--usage-source",choices=["measured","derived","unknown"],default="unknown");rr.add_argument("--outcome",choices=["pass","partial","blocked","fail"]);rr.set_defaults(func=record_run)
     s.add_parser("tune").set_defaults(func=tune_cmd)
     for name in ("recommend","explain"):
-        q=s.add_parser(name);q.add_argument("--task-class",required=True);q.add_argument("--domain");q.add_argument("--project");q.add_argument("--worker-revision");q.add_argument("--skill-version");q.add_argument("--delegation-depth",type=int,default=0);q.set_defaults(func=recommend)
+        q=s.add_parser(name);q.add_argument("--task-class",required=True);q.add_argument("--domain");q.add_argument("--project");q.add_argument("--write-class",choices=["read_only","write_isolated","write_shared"]);q.add_argument("--worker-revision");q.add_argument("--skill-version");q.add_argument("--delegation-depth",type=int,default=0);q.set_defaults(func=recommend)
     rep=s.add_parser("report");rep.add_argument("--project");rep.add_argument("--days",type=int);rep.set_defaults(func=report)
     rs=s.add_parser("reset");rs.add_argument("--learned-only",action="store_true");rs.add_argument("--yes",action="store_true");rs.set_defaults(func=reset);return p
 def main():a=parser().parse_args();a.func(a);return 0
