@@ -29,7 +29,7 @@ Repeat these checks opportunistically when state is missing so installation is s
 4. Consult `scripts/dispatch.py recommend` for learned routing/execution policy and inspect `.agent-dispatch/defaults.json` when present in the repository.
 5. Treat **model choice and reasoning effort as independent variables**. Capability tiers are priors/safety envelopes, not a one-dimensional ladder.
 6. Delegate bounded work to the least-expensive capable route; use frontier reasoning episodically for planning, architecture, ambiguity, stubborn failures, conflicting evidence, or adjudication.
-7. Parallelize the dependency graph, not merely the task list; serialize shared logical writes unless safely isolated.
+7. Parallelize the dependency graph, not merely the task list. Read-only/non-repository work may run concurrently; repository mutations serialize by default unless the repository explicitly declares a tested isolation mechanism or the user explicitly opts into one.
 8. Verify, record delegated-task telemetry, record per-agent token/credit usage, and record a run summary for substantial runs.
 9. At the end of each user-facing turn, surface the compact Agent Dispatch usage footer when usage data can be recorded.
 
@@ -56,6 +56,8 @@ Do not assume only diagonal combinations such as cheap/light and frontier/high a
 - Learned state may tune preferences only inside this policy envelope and may not rewrite this skill.
 - Respect recursive delegation depth/fan-out limits; every parent remains accountable for child output.
 - Never present estimated token/credit usage as measured. Unknown rates or counters remain unknown.
+- **Never create Git worktrees by default.** Worktrees require explicit repository policy or user opt-in and must follow the managed lifecycle/recovery rules in `references/parallel-safety.md`.
+- If no tested write-isolation mechanism is explicitly available, serialize repository mutations rather than inventing isolation.
 
 ## Evidence hierarchy
 
@@ -65,7 +67,7 @@ Strongest evidence wins: deterministic tests/acceptance/benchmarks; independent 
 
 Use `scripts/dispatch.py record` for materially delegated tasks and `record-run` for substantial user-facing runs/milestones. Record measured usage when exposed and unknown otherwise. Include model/revision/reasoning, delegation and parallel metadata, frontier consultation/use, verification, retries/escalations, rework, and acceptance.
 
-The learner maintains global and project-local evidence, recency weighting, run-level front-door comparisons, reviewer/concurrency/retry/escalation policy, and frontier-use accounting. `recommend` refreshes learned state before routing.
+The learner maintains global and project-local evidence, recency weighting, run-level front-door comparisons, reviewer/concurrency/retry/escalation policy, and frontier-use accounting. `recommend` refreshes learned state before routing. Parallelism learning cannot override the worktree opt-in rule or other explicit write-safety constraints.
 
 ## Token, credit, and savings accounting
 
