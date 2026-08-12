@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Dispatch"
+  short_description: "Adaptive subagent routing, parallelism, and telemetry"
+  default_prompt: "Use Agent Dispatch to decompose this work, route bounded subtasks to the least-expensive capable agents, parallelize safely, escalate when needed, verify results, and learn from telemetry."
