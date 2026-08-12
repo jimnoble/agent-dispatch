@@ -1,41 +1,50 @@
-# Routing and escalation
+# Routing, escalation, and recursive delegation
 
 ## Capability tiers
 
-Use stable capability labels in policy and telemetry; keep concrete model mappings localized because model lineups change.
+Use stable capability labels in policy/telemetry and localize concrete model mappings because lineups change.
 
-- `frontier`: architecture, ambiguous cross-system reasoning, difficult debugging, consequential planning/adjudication, final acceptance when stakes warrant it.
+- `frontier`: architecture, consequential planning/adjudication, ambiguous cross-system reasoning, difficult debugging, high-stakes acceptance.
 - `general`: bounded implementation, normal debugging, code review, moderate investigation, ordinary integration.
-- `cheap`: mechanical edits, repository inventory, grep/search, formatting, simple tests, metadata extraction, straightforward transformations.
-- `alternate_pool`: work reliably handled by a model with a separate/favorable usage pool; prefer it when it preserves scarce capacity without reducing expected acceptance.
+- `cheap`: mechanical edits, grep/search, formatting, simple tests, metadata extraction, straightforward transformations.
+- `alternate_pool`: bounded work reliably handled by a separate/favorable usage pool; prefer it when acceptance remains high.
 
-Current environment mappings should be discovered from the Codex runtime/UI when available. Do not invent model availability. When GPT-5.6 family choices are available, a sensible prior is Sol/frontier, Terra/general, Luna/cheap. Treat Codex Spark as an alternate-pool candidate for bounded work.
+Discover available models from the current Codex runtime/UI. Do not invent availability. When present, a reasonable cold-start mapping is Sol/frontier, Terra/general, Luna/cheap, and Codex Spark as an alternate-pool candidate.
 
 ## Frontier consultation modes
 
 Use the narrowest sufficient mode:
 
-1. `plan`: ask frontier agent for a bounded decomposition/architecture decision, then execute cheaply.
-2. `consult`: ask a focused question when ambiguity or conflict appears mid-task.
-3. `subtree`: let frontier agent own a genuinely frontier-heavy subtree only when repeated episodic consultation would be worse.
-4. `adjudicate`: resolve conflicting worker/reviewer evidence.
+1. `plan`: bounded decomposition/architecture decision, then execute cheaply.
+2. `consult`: focused frontier question when ambiguity/conflict appears.
+3. `adjudicate`: resolve conflicting worker/reviewer evidence.
+4. `subtree`: frontier agent owns a genuinely frontier-heavy subtree only when repeated consultation would cost more.
 
-Do not default to `subtree`; it erases most savings of a cheaper front door.
+Do not default to `subtree`; that turns a cheap front door into a disguised frontier front door.
 
-## Escalation triggers
+## Escalation
 
-Escalate one tier when any applies:
+Escalate when confidence is materially low, ambiguity can change architecture/acceptance, repeated attempts reveal capability mismatch, scope unexpectedly crosses subsystems, reviewer and worker disagree on consequential correctness, evidence conflicts, or the task materially departs from the delegated packet.
 
-- confidence is materially low;
-- requirements are ambiguous in a way that could change architecture or acceptance;
-- two substantive attempts fail for the same underlying reason (often escalate after one when the failure clearly reflects capability mismatch);
-- the proposed change broadens scope or crosses subsystem boundaries unexpectedly;
-- worker and reviewer disagree on consequential correctness;
-- evidence conflicts;
-- the task has become materially different from the bounded delegated packet.
-
-Avoid retry loops. Record failed attempts and escalation so the learner can route similar work directly to the stronger tier later.
+The learned policy can lower retry budgets or escalation thresholds for classes that historically thrash before rescue. Hard upper bounds remain conservative; never use a learned retry budget as a reason to persist through an obvious capability mismatch.
 
 ## Front-door behavior
 
-The user chooses the front-door model through normal Codex UI controls. Record it as an experimental dimension. A cheap front door must not become a weak gatekeeper: when task classification itself is uncertain or consequential, consult a stronger agent early.
+The user chooses the front-door model through normal Codex UI controls. Record it as an experimental dimension. When task classification/planning itself is uncertain or consequential, consult stronger reasoning early rather than relying on a weak gatekeeper.
+
+At the end of a substantial run, record a run summary so front-door quality/cost is evaluated by whole-job outcome.
+
+## Recursive delegation
+
+Recursive delegation is allowed because context isolation can save additional tokens: a general worker may delegate bounded cheap inventory/test/mechanical work instead of doing it itself.
+
+Defaults:
+
+- maximum delegation depth: 2 below the front door;
+- every parent remains accountable for child integration/acceptance;
+- children must use the same bounded task/result contracts;
+- do not recursively delegate merely to create management layers;
+- stop recursion when the task is already bounded and cheap;
+- fan-out still follows dependency and write-safety rules.
+
+`recommend` reports remaining delegation depth.
