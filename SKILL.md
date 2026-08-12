@@ -1,6 +1,6 @@
 ---
 name: agent-dispatch
-description: Optimize Codex work with adaptive subagent orchestration. Use for nontrivial coding or repository tasks that benefit from delegation, independent model/reasoning exploration, episodic frontier consultation, safe parallel work, context isolation, verification, telemetry, or learned repository defaults. Do not use for trivial single-step work where orchestration overhead dominates.
+description: Optimize Codex work with adaptive subagent orchestration. Use for nontrivial coding or repository tasks that benefit from delegation, independent model/reasoning exploration, episodic frontier consultation, safe parallel work, context isolation, verification, telemetry, usage accounting, or learned repository defaults. Do not use for trivial single-step work where orchestration overhead dominates.
 ---
 
 # Agent Dispatch
@@ -16,7 +16,8 @@ Optimize for accepted results per scarce resource without learning away correctn
 5. Treat **model choice and reasoning effort as independent variables**. Capability tiers are priors/safety envelopes, not a one-dimensional ladder.
 6. Delegate bounded work to the least-expensive capable route; use frontier reasoning episodically for planning, architecture, ambiguity, stubborn failures, conflicting evidence, or adjudication.
 7. Parallelize the dependency graph, not merely the task list; serialize shared logical writes unless safely isolated.
-8. Verify, record delegated-task telemetry, and record a run summary for substantial runs.
+8. Verify, record delegated-task telemetry, record per-agent token/credit usage, and record a run summary for substantial runs.
+9. At the end of each user-facing turn, surface the compact Agent Dispatch usage footer when usage data can be recorded.
 
 Read `references/routing.md`, `references/parallel-safety.md`, `references/contracts.md`, and `references/learning.md` when their detail is needed.
 
@@ -40,6 +41,7 @@ Do not assume only diagonal combinations such as cheap/light and frontier/high a
 - Never weaken tests, acceptance criteria, safety rules, permissions, or verification requirements to improve apparent efficiency.
 - Learned state may tune preferences only inside this policy envelope and may not rewrite this skill.
 - Respect recursive delegation depth/fan-out limits; every parent remains accountable for child output.
+- Never present estimated token/credit usage as measured. Unknown rates or counters remain unknown.
 
 ## Evidence hierarchy
 
@@ -50,6 +52,18 @@ Strongest evidence wins: deterministic tests/acceptance/benchmarks; independent 
 Use `scripts/dispatch.py record` for materially delegated tasks and `record-run` for substantial user-facing runs/milestones. Record measured usage when exposed and unknown otherwise. Include model/revision/reasoning, delegation and parallel metadata, frontier consultation/use, verification, retries/escalations, rework, and acceptance.
 
 The learner maintains global and project-local evidence, recency weighting, run-level front-door comparisons, reviewer/concurrency/retry/escalation policy, and frontier-use accounting. `recommend` refreshes learned state before routing.
+
+## Token, credit, and savings accounting
+
+Use `scripts/usage.py record-turn` to record usage for the front door and each materially used subagent separately. Each usage component identifies agent ID, role, model, reasoning effort, input tokens, cached-input tokens, output tokens, and whether those token counts are measured or estimated.
+
+The ledger derives credits from the local Codex rate card when a public numeric rate exists. A model with no numeric published rate remains unknown rather than being assigned a guessed price.
+
+At the end of each user-facing turn, use `scripts/usage.py footer` to surface a compact total plus per-subagent/model/effort breakdown. Use `scripts/usage.py report` for aggregate project reporting.
+
+Reports also calculate a **Sol/max same-token counterfactual**: the observed input/cached/output token mix is repriced at the Sol rate to estimate what the same token volume would have cost if routed entirely to Sol. Reasoning effort itself is not a separate rate-card multiplier; max reasoning may change token volume in reality. Therefore this baseline is explicitly an estimate, and `--baseline-token-multiplier` may be used for sensitivity analysis or an empirically learned multiplier. Never describe the counterfactual as actual usage.
+
+This makes it possible to report actual/derived usage per agent and model, total usage, and estimated credits saved by dispatch relative to an all-Sol/max policy.
 
 ## Promoting burn-in into repository defaults
 
@@ -72,6 +86,10 @@ Bootstrap idempotently installs the small Agent Dispatch trigger in global Codex
 
 - `scripts/dispatch.py recommend` / `explain` — routing and execution policy
 - `scripts/dispatch.py report` — front-door and frontier-use reporting
+- `scripts/usage.py record-turn` — per-agent token/credit usage for a turn
+- `scripts/usage.py footer` — compact end-of-turn usage + savings line
+- `scripts/usage.py report` — aggregate actual usage, route breakdown, and all-Sol/max counterfactual
+- `scripts/usage.py show-rates` — inspect the local rate card
 - `scripts/surface.py register-cell` — record a runtime-supported model×effort cell
 - `scripts/surface.py suggest` — choose an under-explored cell
 - `scripts/surface.py promote` — promote high-confidence burn-in to repo defaults
