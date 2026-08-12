@@ -18,7 +18,9 @@ Agent Dispatch keeps your normal Codex model picker as the front door. Underneat
 - route each subtask to the least-expensive model/reasoning tier likely to succeed;
 - reserve frontier reasoning for planning, architecture, ambiguity, hard debugging, adjudication, and other high-leverage decisions;
 - preferentially exploit alternate usage pools such as Codex Spark when they fit the work;
-- run dependency-independent work concurrently while isolating conflicting writes;
+- run dependency-independent read-only or non-repository work concurrently;
+- serialize repository mutations by default unless the repository explicitly provides a tested isolation mechanism or the user opts into one;
+- **never create Git worktrees by default**; worktrees are explicit opt-in and must follow managed lifecycle/recovery rules;
 - give workers narrow task packets instead of cloning giant parent contexts;
 - escalate early when a cheaper worker is out of its depth instead of paying for repeated failed attempts;
 - independently review consequential delegated work and require evidence rather than accepting a worker's `done`;
@@ -33,7 +35,7 @@ Agent Dispatch keeps your normal Codex model picker as the front door. Underneat
 
 A frontier model can often solve the entire job itself, but that is not always the best use of frontier tokens. Many coding tasks contain a mixture of expensive reasoning and cheap execution: architecture beside repository inventory, difficult debugging beside mechanical edits, planning beside test execution.
 
-Agent Dispatch separates those concerns. A stronger model can be consulted episodically for the decisions that justify it while cheaper workers handle bounded implementation, investigation, review, search, tests, or mechanical work. Independent branches/worktrees and dependency-aware scheduling allow safe work to happen in parallel.
+Agent Dispatch separates those concerns. A stronger model can be consulted episodically for the decisions that justify it while cheaper workers handle bounded implementation, investigation, review, search, tests, or mechanical work. Dependency-aware scheduling still gives us substantial safe parallelism without requiring extra repository copies.
 
 The parent agent still owns integration and final correctness. Delegation transfers execution, **not responsibility**.
 
@@ -43,7 +45,7 @@ Static routing rules are only priors. Agent Dispatch maintains append-only local
 
 It can learn, for example, that a cheap model reliably handles repository inventory, that a general model is the sweet spot for a particular project's Rust implementation, or that a class of Blender failures nearly always escalates and should skip the cheap attempt next time.
 
-Learning is bounded. It may tune model/reasoning preferences, retry and escalation behavior, reviewer selection, exploration, and parallelism preferences. It may **not** learn away tests, acceptance criteria, safety constraints, permissions, or required verification.
+Learning is bounded. It may tune model/reasoning preferences, retry and escalation behavior, reviewer selection, exploration, and parallelism preferences. It may **not** learn away tests, acceptance criteria, safety constraints, permissions, required verification, or worktree opt-in requirements.
 
 Your front-door model remains your choice in the normal Codex UI. That makes front-door selection an experiment too: accumulated telemetry can later tell you whether a cheaper front door plus selective frontier delegation actually matched the quality of starting every task on the frontier model.
 
