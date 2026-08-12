@@ -7,19 +7,20 @@ description: Optimize Codex work with adaptive subagent orchestration. Use for n
 
 Optimize for accepted results per scarce resource without learning away correctness.
 
-## First-use invariant
+## First-use and start-of-turn invariant
 
 The public installation contract is only: `Install github.com/jimnoble/agent-dispatch`.
 
-Do not require the user to run a bootstrap or initialization command after installation. On the first activation in an environment, silently perform routine initialization before dispatching work:
+Do not require the user to run a bootstrap or initialization command after installation. On first activation, and opportunistically on later activations, silently perform routine initialization before dispatching work:
 
-1. ensure Agent Dispatch local state exists (`scripts/dispatch.py init` is available as the internal primitive);
-2. ensure the managed Agent Dispatch trigger exists in global Codex `AGENTS.md` (`scripts/bootstrap_agents.py` is the internal idempotent repair primitive);
+1. ensure Agent Dispatch local state exists;
+2. ensure the managed Agent Dispatch trigger exists in global Codex `AGENTS.md`;
 3. initialize usage/rate-card state when needed;
-4. preserve unrelated user configuration; and
-5. continue the user's original task without treating setup as a separate user-visible step.
+4. run `scripts/resources.py reconcile` before creating any Agent Dispatch-managed temporary resource;
+5. preserve unrelated user configuration; and
+6. continue the user's original task without treating setup/reconciliation as a separate user-visible step unless intervention is actually required.
 
-Repeat these checks opportunistically when state is missing so installation is self-healing. If a malformed managed marker or another genuine conflict makes automatic repair unsafe, report the conflict rather than overwriting unrelated configuration.
+Reconciliation is deliberately scoped to the Agent Dispatch managed-resource registry. Never scan arbitrary user directories looking for garbage. If a malformed managed marker, quarantined resource with potentially valuable work, or another genuine conflict makes automatic repair unsafe, report it rather than deleting or overwriting it.
 
 ## Start-of-task protocol
 
@@ -34,6 +35,22 @@ Repeat these checks opportunistically when state is missing so installation is s
 9. At the end of each user-facing turn, surface the compact Agent Dispatch usage footer when usage data can be recorded.
 
 Read `references/routing.md`, `references/parallel-safety.md`, `references/contracts.md`, and `references/learning.md` when their detail is needed.
+
+## Managed temporary resources and crash recovery
+
+Agent turns may terminate unexpectedly. Therefore end-of-turn cleanup is only best effort; **start-of-subsequent-turn reconciliation is the reliability mechanism**.
+
+For any temporary resource Agent Dispatch itself creates (scratch directory, cache workspace, temporary workspace, explicitly opted-in Git worktree):
+
+- register it with `scripts/resources.py register` **before creation**;
+- keep it inside the managed namespace under `~/.codex/agent-dispatch/workspaces/<repo-id>/<run-id>/`; never create arbitrary sibling directories next to the user's repository;
+- mark it active/heartbeat leases while genuinely in use when long-lived;
+- mark cleanup pending when work is complete and clean immediately when safe;
+- on every later activation, reconcile expired resources before creating new ones;
+- never blindly delete a stale Git worktree; inspect for uncommitted work and use Git-aware `worktree remove`/`prune` when safe;
+- quarantine rather than delete anything with uncommitted/potentially valuable work, an unmanaged path, missing lifecycle metadata, or failed Git-aware cleanup.
+
+A concurrent live resource must not be reclaimed merely because another turn ended. Lease expiry plus registry state gates reclamation. Cleanup/recovery must never depend on the creating turn reaching its final phase.
 
 ## Model × reasoning exploration
 
@@ -58,6 +75,7 @@ Do not assume only diagonal combinations such as cheap/light and frontier/high a
 - Never present estimated token/credit usage as measured. Unknown rates or counters remain unknown.
 - **Never create Git worktrees by default.** Worktrees require explicit repository policy or user opt-in and must follow the managed lifecycle/recovery rules in `references/parallel-safety.md`.
 - If no tested write-isolation mechanism is explicitly available, serialize repository mutations rather than inventing isolation.
+- Never create an Agent Dispatch temporary resource outside its managed namespace; register before create, and reconcile stale managed resources at the top of subsequent activations.
 
 ## Evidence hierarchy
 
@@ -79,8 +97,6 @@ At the end of each user-facing turn, use `scripts/usage.py footer` to surface a 
 
 Reports also calculate a **Sol/max same-token counterfactual**: the observed input/cached/output token mix is repriced at the Sol rate to estimate what the same token volume would have cost if routed entirely to Sol. Reasoning effort itself is not a separate rate-card multiplier; max reasoning may change token volume in reality. Therefore this baseline is explicitly an estimate, and a baseline token multiplier may be used for sensitivity analysis or an empirically learned multiplier. Never describe the counterfactual as actual usage.
 
-This makes it possible to report actual/derived usage per agent and model, total usage, and estimated credits saved by dispatch relative to an all-Sol/max policy.
-
 ## Promoting burn-in into repository defaults
 
 Burn-in discoveries should survive beyond transient global telemetry when project-local evidence is strong.
@@ -91,10 +107,12 @@ Repository defaults are strong priors, not immutable truth. New project-local ev
 
 ## Internal repair primitives
 
-These commands exist for the skill/agent to initialize or repair itself. They are not required user-facing installation steps:
+These commands exist for the skill/agent to initialize, reconcile, or repair itself. They are not required user-facing installation steps:
 
 - `scripts/dispatch.py init` — ensure local orchestration state
 - `scripts/bootstrap_agents.py` — ensure the managed global `AGENTS.md` trigger
+- `scripts/resources.py reconcile` — recover/clean expired Agent Dispatch-managed resources
+- `scripts/resources.py list` — inspect the managed resource registry
 - `scripts/usage.py show-rates` — inspect/initialize the local rate card
 
 ## Useful commands
@@ -104,9 +122,8 @@ These commands exist for the skill/agent to initialize or repair itself. They ar
 - `scripts/usage.py record-turn` — per-agent token/credit usage for a turn
 - `scripts/usage.py footer` — compact end-of-turn usage + savings line
 - `scripts/usage.py report` — aggregate actual usage, route breakdown, and all-Sol/max counterfactual
-- `scripts/usage.py show-rates` — inspect the local rate card
 - `scripts/surface.py register-cell` — record a runtime-supported model×effort cell
 - `scripts/surface.py suggest` — choose an under-explored cell
 - `scripts/surface.py promote` — promote high-confidence burn-in to repo defaults
-- `scripts/surface.py show-defaults` — inspect promoted defaults
+- `scripts/resources.py register|activate|heartbeat|complete|reconcile|list` — managed-resource lifecycle and recovery
 - `scripts/dispatch.py reset --learned-only` — rebuild learning from retained raw telemetry
