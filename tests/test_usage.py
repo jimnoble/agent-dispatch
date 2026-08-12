@@ -3,15 +3,18 @@ from pathlib import Path
 HERE=Path(__file__).resolve().parents[1];USAGE=HERE/"scripts"/"usage.py"
 class UsageTests(unittest.TestCase):
  def cli(self,*a,env=None):return subprocess.run(["python3",str(USAGE),*a],check=True,text=True,capture_output=True,env=env)
- def test_token_rate_credit_derivation_and_footer(self):
+ def test_subagent_breakdown_and_sol_baseline(self):
   with tempfile.TemporaryDirectory() as td:
    e=os.environ.copy();e["AGENT_DISPATCH_HOME"]=td
-   x=json.loads(self.cli("record-turn","--turn-id","t1","--project","demo","--front-door-model","terra","--front-door-effort","medium","--usage","gpt-5.6-sol,100000,50000,10000,measured","--usage","gpt-5.6-luna,200000,0,20000,estimated",env=e).stdout)
-   self.assertEqual(x["token_total"],380000);self.assertEqual(x["token_source"],"mixed");self.assertEqual(x["credit_source"],"derived_from_token_rate_card");self.assertGreater(x["credit_total"],0)
-   f=self.cli("footer","--turn-id","t1",env=e).stdout.strip();self.assertIn("credits",f);self.assertIn("tokens",f);self.assertTrue(f.startswith("Agent Dispatch usage"))
- def test_rough_message_fallback_is_labeled(self):
+   x=json.loads(self.cli("record-turn","--turn-id","t1","--project","demo","--front-door-model","terra","--front-door-effort","medium",
+    "--usage","fd,front_door,gpt-5.6-terra,medium,100000,50000,10000,measured",
+    "--usage","w1,worker,gpt-5.6-luna,high,200000,0,20000,measured",env=e).stdout)
+   self.assertEqual(x["token_total"],380000);self.assertEqual(x["token_source"],"measured");self.assertGreater(x["baseline_credits"],x["credit_total"]);self.assertGreater(x["estimated_credit_savings"],0)
+   r=json.loads(self.cli("report","--project","demo",env=e).stdout);self.assertEqual(len(r["by_subagent_model_effort"]),2);self.assertGreater(r["estimated_savings_pct"],0)
+   f=self.cli("footer","--turn-id","t1",env=e).stdout.strip();self.assertIn("Sol/max",f);self.assertIn("estimated savings",f);self.assertIn("w1:worker",f)
+ def test_unknown_rate_stays_unknown(self):
   with tempfile.TemporaryDirectory() as td:
    e=os.environ.copy();e["AGENT_DISPATCH_HOME"]=td
-   x=json.loads(self.cli("record-turn","--turn-id","t1","--message","terra,2",env=e).stdout)
-   self.assertEqual(x["credit_source"],"rough_message_average");self.assertIsNone(x.get("token_total"));self.assertGreater(x["credit_total"],0)
+   x=json.loads(self.cli("record-turn","--turn-id","t1","--usage","w1,worker,gpt-5.3-codex-spark,medium,1000,0,1000,measured",env=e).stdout)
+   self.assertIsNone(x.get("credit_total"));self.assertEqual(x["credit_source"],"partial_or_unknown")
 if __name__=="__main__":unittest.main()
