@@ -6,9 +6,9 @@ Adaptive subagent orchestration for Codex: delegate work to the least-expensive 
 
 Tell Codex:
 
-> Install the `agent-dispatch` skill from `https://github.com/jimnoble/agent-dispatch/tree/main/skills/agent-dispatch` and run its bootstrap step.
+> Install `github.com/jimnoble/agent-dispatch` and run its bootstrap step.
 
-Or use Codex's bundled skill installer with that GitHub directory URL.
+The repository root is the skill package, so the repo URL is the canonical install address.
 
 After installation, restart Codex if the skill does not appear immediately.
 
@@ -37,7 +37,7 @@ No telemetry is uploaded by this skill.
 
 ## Versioning
 
-Releases use semantic Git tags (`vMAJOR.MINOR.PATCH`). Install a pinned version by changing `main` in the GitHub directory URL to a tag such as `v1.0.0`.
+Releases use semantic Git tags (`vMAJOR.MINOR.PATCH`). For reproducible installs, tell the coding agent to install a specific Git tag, for example `v1.0.0`.
 
 ## License
 

@@ -2,7 +2,7 @@
 from pathlib import Path
 import sys
 
-p = Path("skills/agent-dispatch/SKILL.md")
+p = Path("SKILL.md")
 text = p.read_text(encoding="utf-8")
 if not text.startswith("---\n"):
     raise SystemExit("SKILL.md missing YAML frontmatter")
