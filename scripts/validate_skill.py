@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import sys
+
+p = Path("skills/agent-dispatch/SKILL.md")
+text = p.read_text(encoding="utf-8")
+if not text.startswith("---\n"):
+    raise SystemExit("SKILL.md missing YAML frontmatter")
+end = text.find("\n---\n", 4)
+if end < 0:
+    raise SystemExit("SKILL.md frontmatter not closed")
+front = text[4:end]
+required = {"name", "description"}
+keys = {line.split(":", 1)[0].strip() for line in front.splitlines() if ":" in line}
+missing = required - keys
+if missing:
+    raise SystemExit(f"SKILL.md missing required frontmatter keys: {sorted(missing)}")
+if "name: agent-dispatch" not in front:
+    raise SystemExit("skill name must be agent-dispatch")
+print("skill metadata OK")
