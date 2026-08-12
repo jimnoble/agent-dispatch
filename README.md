@@ -1,4 +1,4 @@
-> Install `github.com/jimnoble/agent-dispatch` and run its bootstrap step.
+> Install `github.com/jimnoble/agent-dispatch`.
 
 # Agent Dispatch
 
@@ -7,6 +7,8 @@
 Codex subagents are powerful, but deciding **what to delegate, to which model, at what reasoning level, when to run work in parallel, and when to escalate** is itself an orchestration problem. Agent Dispatch gives the front-door coding agent a reusable operating policy for doing that deliberately instead of treating every task as one monolithic model invocation.
 
 The goal is simple: **approach frontier-model quality while reducing scarce-model usage and wall-clock time.**
+
+There is no post-install command. On first use, Agent Dispatch initializes its local state and repairs/installs its small global `AGENTS.md` trigger automatically. The bundled bootstrap helper exists only as an internal/self-repair primitive; users do not need to invoke it.
 
 ## What it does
 
@@ -20,8 +22,11 @@ Agent Dispatch keeps your normal Codex model picker as the front door. Underneat
 - give workers narrow task packets instead of cloning giant parent contexts;
 - escalate early when a cheaper worker is out of its depth instead of paying for repeated failed attempts;
 - independently review consequential delegated work and require evidence rather than accepting a worker's `done`;
-- record local telemetry about routing, retries, escalation, rework, acceptance, duration, and measured usage when available;
-- autonomously tune future routing preferences from that telemetry without weakening correctness requirements;
+- explore model choice and reasoning effort independently, including counterintuitive combinations when supported;
+- record local telemetry about routing, retries, escalation, rework, acceptance, duration, tokens, credits, and measured usage when available;
+- report per-agent/model/effort usage and estimate savings against an all-frontier baseline;
+- autonomously tune future routing preferences from telemetry without weakening correctness requirements;
+- promote high-confidence burn-in discoveries into inspectable repository defaults;
 - compare how different user-selected front-door models perform over time.
 
 ## Why
@@ -40,7 +45,7 @@ It can learn, for example, that a cheap model reliably handles repository invent
 
 Learning is bounded. It may tune model/reasoning preferences, retry and escalation behavior, reviewer selection, exploration, and parallelism preferences. It may **not** learn away tests, acceptance criteria, safety constraints, permissions, or required verification.
 
-Your front-door model remains your choice in the normal Codex UI. That makes front-door selection an experiment too: accumulated telemetry can later tell you whether, say, a cheaper front door plus selective frontier delegation actually matched the quality of starting every task on the frontier model.
+Your front-door model remains your choice in the normal Codex UI. That makes front-door selection an experiment too: accumulated telemetry can later tell you whether a cheaper front door plus selective frontier delegation actually matched the quality of starting every task on the frontier model.
 
 ## Context is a resource too
 
@@ -54,21 +59,25 @@ Runtime state lives by default at:
 
 Raw events are append-only JSONL; learned routing state is derived and inspectable. No telemetry is uploaded by this skill. Missing token/usage data stays unknown rather than being invented.
 
-Useful operations include routing recommendations, tuning, front-door performance reports, routing explanations, and resetting learned state while preserving raw telemetry.
+Useful operations include routing recommendations, tuning, front-door performance reports, routing explanations, usage/savings reports, and resetting learned state while preserving raw telemetry.
 
-## Bootstrap
+## Zero-step initialization
 
-After installation, the bootstrap initializes local state and idempotently adds a small Agent Dispatch trigger block to your global Codex `AGENTS.md`, preserving existing content. That gives Codex a persistent reminder to consider orchestration for substantial work while keeping the detailed policy in the skill itself.
+Installation is the only user action. On first activation the skill must, without prompting for routine setup:
 
-Restart Codex if the newly installed skill is not discovered immediately.
+1. ensure local Agent Dispatch state exists;
+2. ensure the delimited Agent Dispatch trigger in global Codex `AGENTS.md` exists and is current;
+3. preserve all unrelated existing `AGENTS.md` content;
+4. initialize usage/rate-card state as needed;
+5. continue with the user's original task.
 
-## Versioning
+If initialization encounters a genuine conflict that cannot be repaired safely (for example, a malformed half-present managed marker), the agent should report that conflict rather than overwrite unrelated user configuration.
 
-Releases use semantic Git tags (`vMAJOR.MINOR.PATCH`). For reproducible installs, ask your coding agent to install a specific tag instead of the current default branch.
+Restart Codex only if the host itself requires a restart to discover a newly installed skill.
 
 ## Status
 
-Agent Dispatch is intentionally starting pre-1.0. The core policy is conservative; the adaptive routing behavior is expected to improve with real-world telemetry and iteration.
+Agent Dispatch is intentionally pre-1.0 while real-workload burn-in establishes which routing policies actually dominate.
 
 ## License
 
