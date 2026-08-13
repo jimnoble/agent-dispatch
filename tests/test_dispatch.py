@@ -81,6 +81,18 @@ class DispatchTests(unittest.TestCase):
             subprocess.run(["python3",str(BOOTSTRAP)],check=True,env=env,capture_output=True,text=True)
             second=path.read_text();self.assertEqual(first,second);self.assertNotIn("V12",second)
 
+    def test_bootstrap_repairs_mismatched_commentary_version_once(self):
+        with tempfile.TemporaryDirectory() as td:
+            env=os.environ.copy();env["CODEX_HOME"]=td
+            path=Path(td)/"AGENTS.md"
+            path.write_text("# Global AGENTS.md V10\n\nBegin every request's commentary with exactly `COMPLYING WITH GLOBAL AGENTS.MD\nV10`.\n\n<!-- agent-dispatch:start -->\nold\n<!-- agent-dispatch:end -->\n")
+            subprocess.run(["python3",str(BOOTSTRAP)],check=True,env=env,capture_output=True,text=True)
+            current=path.read_text();path.write_text(current.replace("GLOBAL AGENTS.MD\nV11`","GLOBAL AGENTS.MD\nV10`"))
+            subprocess.run(["python3",str(BOOTSTRAP)],check=True,env=env,capture_output=True,text=True)
+            repaired=path.read_text();self.assertIn("# Global AGENTS.md V12",repaired);self.assertIn("GLOBAL AGENTS.MD\nV12`",repaired)
+            subprocess.run(["python3",str(BOOTSTRAP)],check=True,env=env,capture_output=True,text=True)
+            self.assertEqual(repaired,path.read_text())
+
     def test_managed_lifecycle_unknown_usage_and_summary(self):
         with tempfile.TemporaryDirectory() as td:
             env=os.environ.copy();env["AGENT_DISPATCH_HOME"]=td

@@ -25,11 +25,16 @@ def bump_global_version(text: str) -> str:
     match = re.search(r"(?m)^(# Global AGENTS\.md V)(\d+)[ \t]*$", text)
     if not match:
         return text
-    old_version = int(match.group(2))
-    new_version = old_version + 1
+    new_version = int(match.group(2)) + 1
     text = text[:match.start()] + f"{match.group(1)}{new_version}" + text[match.end():]
-    commentary = re.compile(r"(Begin every request's commentary with exactly `COMPLYING WITH GLOBAL AGENTS\.MD\nV)" + str(old_version) + r"(`)")
+    commentary = re.compile(r"(Begin every request's commentary with exactly `COMPLYING WITH GLOBAL AGENTS\.MD\nV)\d+(`)")
     return commentary.sub(rf"\g<1>{new_version}\g<2>", text)
+
+
+def global_version_mismatch(text: str) -> bool:
+    header = re.search(r"(?m)^# Global AGENTS\.md V(\d+)[ \t]*$", text)
+    commentary = re.search(r"Begin every request's commentary with exactly `COMPLYING WITH GLOBAL AGENTS\.MD\nV(\d+)`", text)
+    return bool(header and commentary and header.group(1) != commentary.group(1))
 
 
 def main() -> int:
@@ -48,7 +53,7 @@ def main() -> int:
         return 2
     else:
         new = (existing.rstrip() + "\n\n" if existing.strip() else "") + BLOCK + "\n"
-    if new != existing:
+    if new != existing or global_version_mismatch(existing):
         new = bump_global_version(new)
         path.write_text(new, encoding="utf-8")
         print(f"Installed Agent Dispatch trigger in {path}")

@@ -95,10 +95,19 @@ UTC task journal for the Agent Dispatch telemetry lifecycle implementation and p
 
 > Repository-journaling sidecar created: `.agents/journals/20260813T161019Z-telemetry-lifecycle-2.patch`. It records the corrective atomic version-reference update and regression test.
 
+### Assistant
+
+> One more recovery edge case surfaced before the second install: because the managed block is already current, the new bootstrap would not rewrite the existing V57/V56 mismatch. I’m extending it to detect header/commentary-version drift independently of block drift, repair both to the next version, and remain idempotent afterward. This is exactly the live-upgrade path the tests need to cover.
+
+### Assistant
+
+> Repository-journaling sidecar created: `.agents/journals/20260813T161019Z-telemetry-lifecycle-3.patch`. It records the live-upgrade mismatch detector and idempotence regression test.
+
 ## Patch Files
 
 - `.agents/journals/20260813T161019Z-telemetry-lifecycle-1.patch` — complete non-journal implementation, documentation, metadata, and test diff.
 - `.agents/journals/20260813T161019Z-telemetry-lifecycle-2.patch` — corrective bootstrap version-reference update and regression test.
+- `.agents/journals/20260813T161019Z-telemetry-lifecycle-3.patch` — live-upgrade version-drift detection and idempotence regression test.
 
 ## Changes Made
 
@@ -110,6 +119,7 @@ UTC task journal for the Agent Dispatch telemetry lifecycle implementation and p
 - Updated the skill instructions, learning reference, README, UI metadata, and standalone validation contract.
 - Expanded deterministic coverage from 12 to 22 tests, including reactivation, failed spawn, duplicate lifecycle events, missing telemetry, runtime reconciliation, unknown usage, rough-message rejection, and bootstrap version idempotence.
 - Made bootstrap version maintenance update both the global header and its mandated commentary marker atomically.
+- Added explicit detection and repair for a pre-existing header/commentary version mismatch even when the managed block itself is already current.
 
 ## Problems Encountered
 
@@ -118,6 +128,7 @@ UTC task journal for the Agent Dispatch telemetry lifecycle implementation and p
 - Patch edits produced mixed working-tree line endings. All modified text files were normalized back to the repository’s CRLF checkout policy before final verification.
 - Tracking a conventional unified diff caused its blank context prefixes to trip `git diff --check`; the sidecar was regenerated with zero context and validated using `git apply --unidiff-zero --reverse --check`.
 - The first live bootstrap advanced the global header but left the embedded commentary marker stale. Reloading the changed instruction exposed the inconsistency; the bootstrap and regression fixture were corrected before final completion.
+- The first correction still depended on managed-block drift to trigger a write. The live V57/V56 state demonstrated that version drift must independently trigger repair, so a dedicated recovery test was added.
 
 ## Lessons
 

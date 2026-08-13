@@ -1,0 +1,38 @@
+diff --git a/scripts/bootstrap_agents.py b/scripts/bootstrap_agents.py
+index 817e21f..b15ddb2 100644
+--- a/scripts/bootstrap_agents.py
++++ b/scripts/bootstrap_agents.py
+@@ -28,2 +28 @@ def bump_global_version(text: str) -> str:
+-    old_version = int(match.group(2))
+-    new_version = old_version + 1
++    new_version = int(match.group(2)) + 1
+@@ -31 +30 @@ def bump_global_version(text: str) -> str:
+-    commentary = re.compile(r"(Begin every request's commentary with exactly `COMPLYING WITH GLOBAL AGENTS\.MD\nV)" + str(old_version) + r"(`)")
++    commentary = re.compile(r"(Begin every request's commentary with exactly `COMPLYING WITH GLOBAL AGENTS\.MD\nV)\d+(`)")
+@@ -34,0 +34,6 @@ def bump_global_version(text: str) -> str:
++def global_version_mismatch(text: str) -> bool:
++    header = re.search(r"(?m)^# Global AGENTS\.md V(\d+)[ \t]*$", text)
++    commentary = re.search(r"Begin every request's commentary with exactly `COMPLYING WITH GLOBAL AGENTS\.MD\nV(\d+)`", text)
++    return bool(header and commentary and header.group(1) != commentary.group(1))
++
++
+@@ -51 +56 @@ def main() -> int:
+-    if new != existing:
++    if new != existing or global_version_mismatch(existing):
+diff --git a/tests/test_dispatch.py b/tests/test_dispatch.py
+index 693267c..1fd27fd 100644
+--- a/tests/test_dispatch.py
++++ b/tests/test_dispatch.py
+@@ -83,0 +84,12 @@ class DispatchTests(unittest.TestCase):
++    def test_bootstrap_repairs_mismatched_commentary_version_once(self):
++        with tempfile.TemporaryDirectory() as td:
++            env=os.environ.copy();env["CODEX_HOME"]=td
++            path=Path(td)/"AGENTS.md"
++            path.write_text("# Global AGENTS.md V10\n\nBegin every request's commentary with exactly `COMPLYING WITH GLOBAL AGENTS.MD\nV10`.\n\n<!-- agent-dispatch:start -->\nold\n<!-- agent-dispatch:end -->\n")
++            subprocess.run(["python3",str(BOOTSTRAP)],check=True,env=env,capture_output=True,text=True)
++            current=path.read_text();path.write_text(current.replace("GLOBAL AGENTS.MD\nV11`","GLOBAL AGENTS.MD\nV10`"))
++            subprocess.run(["python3",str(BOOTSTRAP)],check=True,env=env,capture_output=True,text=True)
++            repaired=path.read_text();self.assertIn("# Global AGENTS.md V12",repaired);self.assertIn("GLOBAL AGENTS.MD\nV12`",repaired)
++            subprocess.run(["python3",str(BOOTSTRAP)],check=True,env=env,capture_output=True,text=True)
++            self.assertEqual(repaired,path.read_text())
++
