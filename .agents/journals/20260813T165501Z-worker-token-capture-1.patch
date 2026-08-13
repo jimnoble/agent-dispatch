@@ -1,0 +1,233 @@
+diff --git a/README.md b/README.md
+index dbf0adf..98f2933 100644
+--- a/README.md
++++ b/README.md
+@@ -64 +64 @@ Runtime state lives by default at:
+-Raw events are append-only JSONL; learned routing state is derived and inspectable. No telemetry is uploaded by this skill. Missing token/usage data stays unknown rather than being invented.
++Raw events are append-only JSONL; learned routing state is derived and inspectable. No telemetry is uploaded by this skill. Missing token/usage data stays unknown rather than being invented. When collaboration results omit worker counters, Agent Dispatch can recover exact per-request usage from the bound child's local Codex rollout using lifecycle, agent-path, parent-thread, and activation boundaries. Ambiguous or incomplete attribution fails closed to unknown.
+@@ -67,0 +68,2 @@ Managed delegation follows a receipt lifecycle: `begin-run` → `begin-task` bef
++For task-aware accounting, prefer `scripts/usage.py record-turn --capture-task-usage <task-id>` after `finish-task`. Use `--unknown-task-usage` only when the local rollout and host counters are both unavailable. Corrections remain append-only: a replacement turn can use `--supersedes-turn-id <old-turn-id>`, and reports and lifecycle audits exclude the superseded observation.
++
+diff --git a/SKILL.md b/SKILL.md
+index 3a241e6..ed56118 100644
+--- a/SKILL.md
++++ b/SKILL.md
+@@ -47 +47 @@ Treat each spawn or reactivation as a distinct task attempt, even when the same
+-4. Use `usage.py record-turn --task-usage` for measured/estimated counters or `--unknown-task-usage` when counters are unavailable. Unknown means null, never zero. Record front-door usage with `--usage` or `--unknown-usage` in the same run.
++4. After the worker completes, first use `usage.py record-turn --capture-task-usage <task-id>` to recover exact per-request counters from the bound child rollout. It attributes by lifecycle receipt, agent path, parent thread, and activation boundaries, and fails closed if the match is ambiguous or incomplete. Fall back to `--task-usage` when the host directly exposes counters, or `--unknown-task-usage` only when neither source is available. Unknown means null, never zero. Record front-door usage with `--usage` or `--unknown-usage` in the same run.
+@@ -108,0 +109,2 @@ Use `scripts/usage.py record-turn` to record usage for the front door and each m
++The collaboration result packet may omit worker counters even though the local Codex child rollout contains them. `--capture-task-usage` reads only local rollout metadata, task boundaries, model settings, and `last_token_usage` counters; it does not persist prompts or responses. The current parent thread ID is used to prevent cross-thread agent-path collisions. If an unknown or malformed usage event was already appended, record the corrected complete turn with `--supersedes-turn-id <old-turn-id>` so audits and reports use only the effective replacement.
++
+@@ -140 +142 @@ These commands exist for the skill/agent to initialize, reconcile, or repair its
+-- `scripts/usage.py record-turn` — per-task/per-agent measured, estimated, or unknown usage
++- `scripts/usage.py record-turn` — per-task/per-agent rollout-captured, directly measured, estimated, or unknown usage; supports append-only correction with `--supersedes-turn-id`
+diff --git a/scripts/dispatch.py b/scripts/dispatch.py
+index 60d1002..dc6bc72 100644
+--- a/scripts/dispatch.py
++++ b/scripts/dispatch.py
+@@ -99,0 +100,16 @@ def lifecycle_start(run_id,task_id):
++def effective_turn_usage(evs):
++    turns=[e for e in evs if e.get("event")=="turn_usage"];seen={};superseded=set();errors=[]
++    for e in turns:
++        turn_id=e.get("turn_id")
++        if not turn_id:errors.append("turn_usage event is missing turn_id");continue
++        if turn_id in seen:errors.append(f"duplicate turn_usage ID: {turn_id}");continue
++        target=e.get("supersedes_turn_id")
++        if target:
++            prior=seen.get(target)
++            if not prior:errors.append(f"turn usage {turn_id} supersedes missing or later turn {target}")
++            elif target in superseded:errors.append(f"turn usage {target} is superseded more than once")
++            elif prior.get("run_id")!=e.get("run_id"):errors.append(f"turn usage {turn_id} supersedes a different run")
++            else:superseded.add(target)
++        seen[turn_id]=e
++    return [e for e in turns if e.get("turn_id") not in superseded],errors
++
+@@ -172 +188 @@ def audit_run_data(run_id,expected_agent_ids=None,expected_task_count=None):
+-    turns=[e for e in evs if e.get("event")=="turn_usage"]
++    turns,supersession_errors=effective_turn_usage(evs);errors.extend(supersession_errors)
+diff --git a/scripts/usage.py b/scripts/usage.py
+index bb17f8e..afcd0dd 100644
+--- a/scripts/usage.py
++++ b/scripts/usage.py
+@@ -32,0 +33,92 @@ def events():
++def parse_time(value):
++ return dt.datetime.fromisoformat(str(value).replace("Z","+00:00"))
++def effective_turn_usage(rows):
++ turns=[e for e in rows if e.get("event")=="turn_usage"]
++ seen={};superseded=set()
++ for e in turns:
++  turn_id=e.get("turn_id")
++  if turn_id and turn_id not in seen:seen[turn_id]=e
++  target=e.get("supersedes_turn_id")
++  if target and target in seen and seen[target].get("run_id")==e.get("run_id"):superseded.add(target)
++ return [e for e in turns if e.get("turn_id") not in superseded]
++def validate_supersession(a,rows):
++ if not a.supersedes_turn_id:return
++ if a.supersedes_turn_id==a.turn_id:raise SystemExit("A turn cannot supersede itself")
++ targets=[e for e in rows if e.get("event")=="turn_usage" and e.get("turn_id")==a.supersedes_turn_id]
++ if len(targets)!=1:raise SystemExit(f"Expected exactly one superseded turn {a.supersedes_turn_id}; found {len(targets)}")
++ if targets[0].get("run_id")!=a.run_id:raise SystemExit("Superseded usage must belong to the same run")
++ if any(e.get("supersedes_turn_id")==a.supersedes_turn_id for e in rows if e.get("event")=="turn_usage"):
++  raise SystemExit(f"Turn usage is already superseded: {a.supersedes_turn_id}")
++def sessions_home(value=None):
++ if value:return Path(value).expanduser()
++ return Path(os.environ.get("CODEX_HOME",Path.home()/".codex")).expanduser()/"sessions"
++def lifecycle_task(run_id,task_id,rows):
++ starts=[e for e in rows if e.get("event")=="delegated_task_started" and e.get("run_id")==run_id and e.get("task_id")==task_id]
++ terms=[e for e in rows if e.get("event")=="delegated_task" and e.get("run_id")==run_id and e.get("task_id")==task_id]
++ binds=[e for e in rows if e.get("event")=="delegated_task_bound" and e.get("run_id")==run_id and e.get("task_id")==task_id]
++ if len(starts)!=1:raise SystemExit(f"Expected exactly one task receipt for {task_id}; found {len(starts)}")
++ if len(terms)!=1:raise SystemExit(f"Expected exactly one terminal task event for {task_id}; found {len(terms)}")
++ if len(binds)>1:raise SystemExit(f"Expected at most one task binding for {task_id}; found {len(binds)}")
++ if terms[0].get("spawned",True) is False:raise SystemExit(f"Task was not spawned: {task_id}")
++ ids={x for x in (starts[0].get("agent_id"),binds[0].get("agent_id") if binds else None,terms[0].get("agent_id")) if x}
++ if len(ids)!=1:raise SystemExit(f"Task must resolve to exactly one bound agent ID: {task_id}")
++ return starts[0],terms[0],next(iter(ids))
++def rollout_meta(path,expected_agent_path=None):
++ try:
++  with path.open(encoding="utf-8") as f:
++   for _ in range(8):
++    line=f.readline()
++    if not line:break
++    if '"agent_path"' not in line or (expected_agent_path and expected_agent_path not in line):continue
++    try:e=json.loads(line)
++    except json.JSONDecodeError:continue
++    p=e.get("payload",{})
++    if e.get("type")=="session_meta" and p.get("agent_path"):
++     return {"agent_path":p.get("agent_path"),"parent_thread_id":p.get("parent_thread_id"),"session_id":p.get("id")}
++ except (OSError,UnicodeDecodeError):return None
++ return None
++def rollout_intervals(path):
++ intervals=[];active=None;last_model=None;last_effort=None
++ try:
++  with path.open(encoding="utf-8") as f:
++   for line in f:
++    try:e=json.loads(line)
++    except json.JSONDecodeError:continue
++    p=e.get("payload",{});kind=p.get("type")
++    if e.get("type")=="turn_context":
++     last_model=p.get("model") or last_model;last_effort=p.get("effort") or last_effort
++     if active:
++      active["model"]=p.get("model") or active.get("model")
++      active["effort"]=p.get("effort") or active.get("effort")
++    elif kind=="task_started":
++     active={"turn_id":p.get("turn_id"),"started_at":parse_time(e.get("timestamp")),"model":last_model,"effort":last_effort,
++             "request_count":0,"input_total":0,"cached":0,"output":0}
++    elif kind=="token_count" and active:
++     u=p.get("info",{}).get("last_token_usage")
++     if u and int(u.get("total_tokens",0) or 0)>0:
++      i=int(u.get("input_tokens",0) or 0);c=int(u.get("cached_input_tokens",0) or 0);o=int(u.get("output_tokens",0) or 0)
++      if min(i,c,o)<0 or c>i:raise SystemExit(f"Invalid token counters in rollout for {active['turn_id']}")
++      active["request_count"]+=1;active["input_total"]+=i;active["cached"]+=c;active["output"]+=o
++    elif kind=="task_complete" and active and (not p.get("turn_id") or p.get("turn_id")==active.get("turn_id")):
++     active["completed_at"]=parse_time(e.get("timestamp"));intervals.append(active);active=None
++ except (OSError,UnicodeDecodeError) as exc:raise SystemExit(f"Could not read rollout telemetry: {exc}")
++ return intervals
++def capture_task_usage(run_id,task_id,sessions_path,parent_thread_id,rows):
++ if not run_id:raise SystemExit("--capture-task-usage requires --run-id")
++ if not parent_thread_id:raise SystemExit("--capture-task-usage requires --parent-thread-id or CODEX_THREAD_ID")
++ start,term,agent_id=lifecycle_task(run_id,task_id,rows);root=sessions_home(sessions_path)
++ if not root.is_dir():raise SystemExit(f"Codex sessions directory does not exist: {root}")
++ receipt=parse_time(start["timestamp"]);finished=parse_time(term["timestamp"]);matches=[]
++ for path in root.rglob("*.jsonl"):
++  meta=rollout_meta(path,agent_id)
++  if not meta or meta.get("agent_path")!=agent_id:continue
++  if parent_thread_id and meta.get("parent_thread_id")!=parent_thread_id:continue
++  candidates=[x for x in rollout_intervals(path) if x["started_at"]>=receipt-dt.timedelta(seconds=60) and x["completed_at"]<=finished+dt.timedelta(seconds=60) and x["request_count"]>0]
++  if candidates:matches.append((path,max(candidates,key=lambda x:x["started_at"])))
++ if len(matches)!=1:raise SystemExit(f"Expected exactly one completed rollout activation for {task_id}; found {len(matches)}")
++ _,usage=matches[0];model=usage.get("model") or term.get("worker_model") or start.get("requested_worker_model")
++ effort=usage.get("effort") or term.get("worker_reasoning") or start.get("requested_worker_reasoning") or "unknown"
++ if not model:raise SystemExit(f"No effective worker model found for {task_id}")
++ return {"task_id":task_id,"agent_id":agent_id,"role":"worker","model":model,"effort":effort,
++         "input_tokens":usage["input_total"]-usage["cached"],"cached_input_tokens":usage["cached"],"output_tokens":usage["output"],
++         "token_source":"measured","usage_provenance":"codex_rollout_last_token_usage","request_count":usage["request_count"]}
+@@ -77,2 +169,3 @@ def record(a):
+- card=rates();comps=[];actual_known=0.;actual_complete=True;base_known=0.;base_complete=True;tok=0
+- known=list(a.usage or [])+list(a.task_usage or [])
++ rows=events();validate_supersession(a,rows);card=rates();comps=[];actual_known=0.;actual_complete=True;base_known=0.;base_complete=True;tok=0
++ captured=[capture_task_usage(a.run_id,task_id,a.sessions_path,a.parent_thread_id,rows) for task_id in (a.capture_task_usage or [])]
++ known=list(a.usage or [])+list(a.task_usage or [])+captured
+@@ -97 +190 @@ def record(a):
+- e={"schema":SCHEMA,"timestamp":a.timestamp or now(),"event":"turn_usage","turn_id":a.turn_id,"run_id":a.run_id,"project":a.project,"front_door_model":a.front_door_model,"front_door_effort":a.front_door_effort,
++ e={"schema":SCHEMA,"timestamp":a.timestamp or now(),"event":"turn_usage","turn_id":a.turn_id,"run_id":a.run_id,"project":a.project,"front_door_model":a.front_door_model,"front_door_effort":a.front_door_effort,"supersedes_turn_id":a.supersedes_turn_id,
+@@ -101 +194 @@ def filtered(a):
+- xs=[e for e in events() if e.get("event")=="turn_usage"]
++ xs=effective_turn_usage(events())
+@@ -139 +232 @@ def parser():
+- p=argparse.ArgumentParser(description=__doc__);s=p.add_subparsers(dest="cmd",required=True);r=s.add_parser("record-turn");r.add_argument("--turn-id",required=True);r.add_argument("--run-id");r.add_argument("--project");r.add_argument("--front-door-model");r.add_argument("--front-door-effort");r.add_argument("--usage",action="append",type=parse_usage);r.add_argument("--task-usage",action="append",type=parse_task_usage);r.add_argument("--unknown-usage",action="append",type=parse_unknown_usage);r.add_argument("--unknown-task-usage",action="append",type=parse_unknown_task_usage);r.add_argument("--message",action="append",type=parse_message);r.add_argument("--measured-credits",type=float);r.add_argument("--baseline-model",default="gpt-5.6-sol");r.add_argument("--baseline-token-multiplier",type=float,default=1.0);r.add_argument("--timestamp");r.add_argument("--notes");r.set_defaults(func=record)
++ p=argparse.ArgumentParser(description=__doc__);s=p.add_subparsers(dest="cmd",required=True);r=s.add_parser("record-turn");r.add_argument("--turn-id",required=True);r.add_argument("--run-id");r.add_argument("--project");r.add_argument("--front-door-model");r.add_argument("--front-door-effort");r.add_argument("--usage",action="append",type=parse_usage);r.add_argument("--task-usage",action="append",type=parse_task_usage);r.add_argument("--capture-task-usage",action="append",metavar="TASK_ID");r.add_argument("--unknown-usage",action="append",type=parse_unknown_usage);r.add_argument("--unknown-task-usage",action="append",type=parse_unknown_task_usage);r.add_argument("--message",action="append",type=parse_message);r.add_argument("--sessions-path");r.add_argument("--parent-thread-id",default=os.environ.get("CODEX_THREAD_ID"));r.add_argument("--supersedes-turn-id");r.add_argument("--measured-credits",type=float);r.add_argument("--baseline-model",default="gpt-5.6-sol");r.add_argument("--baseline-token-multiplier",type=float,default=1.0);r.add_argument("--timestamp");r.add_argument("--notes");r.set_defaults(func=record)
+diff --git a/tests/test_usage.py b/tests/test_usage.py
+index e64f3bd..b8c92cc 100644
+--- a/tests/test_usage.py
++++ b/tests/test_usage.py
+@@ -3 +3 @@ from pathlib import Path
+-HERE=Path(__file__).resolve().parents[1];USAGE=HERE/"scripts"/"usage.py"
++HERE=Path(__file__).resolve().parents[1];USAGE=HERE/"scripts"/"usage.py";DISPATCH=HERE/"scripts"/"dispatch.py"
+@@ -36,0 +37,66 @@ class UsageTests(unittest.TestCase):
++ def test_capture_task_usage_from_child_rollout(self):
++  with tempfile.TemporaryDirectory() as td:
++   root=Path(td);state=root/"state";sessions=root/"sessions";day=sessions/"2026"/"08"/"13";day.mkdir(parents=True)
++   e=os.environ.copy();e["AGENT_DISPATCH_HOME"]=str(state)
++   lifecycle=[
++    {"event":"run_started","run_id":"r1","timestamp":"2026-08-13T12:00:00Z"},
++    {"event":"delegated_task_started","run_id":"r1","task_id":"t1","timestamp":"2026-08-13T12:00:00Z"},
++    {"event":"delegated_task_bound","run_id":"r1","task_id":"t1","agent_id":"/root/reviewer","timestamp":"2026-08-13T12:00:10Z"},
++    {"event":"delegated_task","run_id":"r1","task_id":"t1","agent_id":"/root/reviewer","spawned":True,"worker_model":"gpt-5.6-terra","worker_reasoning":"medium","timestamp":"2026-08-13T12:02:00Z"},
++   ]
++   state.mkdir();(state/"telemetry.jsonl").write_text("".join(json.dumps(x)+"\n" for x in lifecycle))
++   rollout=[
++    {"timestamp":"2026-08-13T12:00:10Z","type":"session_meta","payload":{"type":"session_meta","id":"child","agent_path":"/root/reviewer","parent_thread_id":"parent"}},
++    {"timestamp":"2026-08-13T12:00:10.100Z","type":"event_msg","payload":{"type":"task_started","turn_id":"inherited"}},
++    {"timestamp":"2026-08-13T12:00:10.200Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":999,"cached_input_tokens":900,"output_tokens":99,"total_tokens":1098}}}},
++    {"timestamp":"2026-08-13T12:00:10.300Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"inherited"}},
++    {"timestamp":"2026-08-13T12:00:11Z","type":"event_msg","payload":{"type":"task_started","turn_id":"actual"}},
++    {"timestamp":"2026-08-13T12:00:12Z","type":"turn_context","payload":{"model":"gpt-5.6-terra","effort":"medium"}},
++    {"timestamp":"2026-08-13T12:00:13Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":80,"output_tokens":10,"total_tokens":110}}}},
++    {"timestamp":"2026-08-13T12:00:14Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":50,"cached_input_tokens":0,"output_tokens":5,"total_tokens":55}}}},
++    {"timestamp":"2026-08-13T12:01:00Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"actual"}},
++   ]
++   (day/"rollout-child.jsonl").write_text("".join(json.dumps(x)+"\n" for x in rollout))
++   x=json.loads(self.cli("record-turn","--turn-id","turn1","--run-id","r1","--unknown-usage","root,front_door,gpt-5.6-sol,max,counters_unavailable","--capture-task-usage","t1","--sessions-path",str(sessions),"--parent-thread-id","parent",env=e).stdout)
++   task=next(c for c in x["components"] if c.get("task_id")=="t1")
++   self.assertEqual((task["input_tokens"],task["cached_input_tokens"],task["output_tokens"]),(70,80,15))
++   self.assertEqual(task["token_source"],"measured");self.assertEqual(task["request_count"],2)
++   self.assertEqual(task["usage_provenance"],"codex_rollout_last_token_usage")
++   audit=subprocess.run(["python3",str(DISPATCH),"audit-run","--run-id","r1","--expected-agent-id","/root/reviewer","--expected-task-count","1"],check=True,text=True,capture_output=True,env=e)
++   self.assertTrue(json.loads(audit.stdout)["ok"])
++ def test_capture_task_usage_fails_closed_on_parent_mismatch(self):
++  with tempfile.TemporaryDirectory() as td:
++   root=Path(td);state=root/"state";sessions=root/"sessions";day=sessions/"2026"/"08"/"13";day.mkdir(parents=True);state.mkdir()
++   e=os.environ.copy();e["AGENT_DISPATCH_HOME"]=str(state)
++   rows=[{"event":"delegated_task_started","run_id":"r1","task_id":"t1","timestamp":"2026-08-13T12:00:00Z"},{"event":"delegated_task_bound","run_id":"r1","task_id":"t1","agent_id":"/root/reviewer"},{"event":"delegated_task","run_id":"r1","task_id":"t1","agent_id":"/root/reviewer","timestamp":"2026-08-13T12:02:00Z"}]
++   (state/"telemetry.jsonl").write_text("".join(json.dumps(x)+"\n" for x in rows))
++   rollout=[{"timestamp":"2026-08-13T12:00:10Z","type":"session_meta","payload":{"agent_path":"/root/reviewer","parent_thread_id":"different"}},{"timestamp":"2026-08-13T12:00:11Z","type":"event_msg","payload":{"type":"task_started","turn_id":"actual"}},{"timestamp":"2026-08-13T12:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":1,"total_tokens":11}}}},{"timestamp":"2026-08-13T12:01:00Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"actual"}}]
++   (day/"rollout-child.jsonl").write_text("".join(json.dumps(x)+"\n" for x in rollout))
++   result=subprocess.run(["python3",str(USAGE),"record-turn","--turn-id","turn1","--run-id","r1","--capture-task-usage","t1","--sessions-path",str(sessions),"--parent-thread-id","parent"],text=True,capture_output=True,env=e)
++   self.assertNotEqual(result.returncode,0);self.assertIn("found 0",result.stderr)
++ def test_capture_task_usage_selects_the_matching_reactivation(self):
++  with tempfile.TemporaryDirectory() as td:
++   root=Path(td);state=root/"state";sessions=root/"sessions";day=sessions/"2026"/"08"/"13";day.mkdir(parents=True);state.mkdir()
++   e=os.environ.copy();e["AGENT_DISPATCH_HOME"]=str(state)
++   rows=[]
++   for task,start,end in (("t1","12:00:00","12:02:00"),("t2","12:10:00","12:12:00")):
++    rows.extend([{"event":"delegated_task_started","run_id":"r1","task_id":task,"agent_id":"/root/reviewer","timestamp":f"2026-08-13T{start}Z"},{"event":"delegated_task","run_id":"r1","task_id":task,"agent_id":"/root/reviewer","worker_model":"gpt-5.6-terra","timestamp":f"2026-08-13T{end}Z"}])
++   (state/"telemetry.jsonl").write_text("".join(json.dumps(x)+"\n" for x in rows))
++   rollout=[{"timestamp":"2026-08-13T12:00:05Z","type":"session_meta","payload":{"agent_path":"/root/reviewer","parent_thread_id":"parent"}}]
++   for turn,start,end,tokens in (("one","12:00:10","12:01:00",10),("two","12:10:10","12:11:00",20)):
++    rollout.extend([{"timestamp":f"2026-08-13T{start}Z","type":"event_msg","payload":{"type":"task_started","turn_id":turn}},{"timestamp":f"2026-08-13T{start}.100Z","type":"turn_context","payload":{"model":"gpt-5.6-terra","effort":"high"}},{"timestamp":f"2026-08-13T{start}.200Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":tokens,"cached_input_tokens":0,"output_tokens":1,"total_tokens":tokens+1}}}},{"timestamp":f"2026-08-13T{end}Z","type":"event_msg","payload":{"type":"task_complete","turn_id":turn}}])
++   (day/"rollout-child.jsonl").write_text("".join(json.dumps(x)+"\n" for x in rollout))
++   first=json.loads(self.cli("record-turn","--turn-id","turn1","--run-id","r1","--capture-task-usage","t1","--sessions-path",str(sessions),"--parent-thread-id","parent",env=e).stdout)
++   second=json.loads(self.cli("record-turn","--turn-id","turn2","--run-id","r1","--capture-task-usage","t2","--sessions-path",str(sessions),"--parent-thread-id","parent",env=e).stdout)
++   self.assertEqual(first["components"][0]["input_tokens"],10);self.assertEqual(second["components"][0]["input_tokens"],20)
++ def test_superseded_unknown_usage_is_excluded_from_report_and_audit(self):
++  with tempfile.TemporaryDirectory() as td:
++   root=Path(td);e=os.environ.copy();e["AGENT_DISPATCH_HOME"]=str(root)
++   lifecycle=[{"event":"run_started","run_id":"r1"},{"event":"delegated_task_started","run_id":"r1","task_id":"t1","agent_id":"a1"},{"event":"delegated_task","run_id":"r1","task_id":"t1","agent_id":"a1","spawned":True}]
++   (root/"telemetry.jsonl").write_text("".join(json.dumps(x)+"\n" for x in lifecycle))
++   self.cli("record-turn","--turn-id","old","--run-id","r1","--unknown-usage","root,front_door,sol,max","--unknown-task-usage","t1,a1,worker,terra,high",env=e)
++   self.cli("record-turn","--turn-id","corrected","--run-id","r1","--supersedes-turn-id","old","--usage","root,front_door,sol,max,10,5,2,measured","--task-usage","t1,a1,worker,terra,high,100,20,10,measured",env=e)
++   report=json.loads(self.cli("report",env=e).stdout);self.assertEqual(report["turns"],1)
++   worker=next(x for x in report["by_subagent_model_effort"] if x["subagent_route"].startswith("a1:"));self.assertEqual(worker["total_tokens"],130)
++   audit=subprocess.run(["python3",str(DISPATCH),"audit-run","--run-id","r1","--expected-agent-id","a1","--expected-task-count","1"],check=True,text=True,capture_output=True,env=e)
++   self.assertTrue(json.loads(audit.stdout)["ok"])

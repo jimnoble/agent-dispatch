@@ -97,6 +97,22 @@ def require_one(events,label):
 def lifecycle_start(run_id,task_id):
     return require_one([e for e in run_events(run_id) if e.get("event")=="delegated_task_started" and e.get("task_id")==task_id],f"start receipt for task {task_id}")
 
+def effective_turn_usage(evs):
+    turns=[e for e in evs if e.get("event")=="turn_usage"];seen={};superseded=set();errors=[]
+    for e in turns:
+        turn_id=e.get("turn_id")
+        if not turn_id:errors.append("turn_usage event is missing turn_id");continue
+        if turn_id in seen:errors.append(f"duplicate turn_usage ID: {turn_id}");continue
+        target=e.get("supersedes_turn_id")
+        if target:
+            prior=seen.get(target)
+            if not prior:errors.append(f"turn usage {turn_id} supersedes missing or later turn {target}")
+            elif target in superseded:errors.append(f"turn usage {target} is superseded more than once")
+            elif prior.get("run_id")!=e.get("run_id"):errors.append(f"turn usage {turn_id} supersedes a different run")
+            else:superseded.add(target)
+        seen[turn_id]=e
+    return [e for e in turns if e.get("turn_id") not in superseded],errors
+
 def begin_run(a):
     rid=a.run_id or str(uuid.uuid4())
     if any(e.get("run_id")==rid for e in all_events()):raise SystemExit(f"Run ID already exists: {rid}")
@@ -169,7 +185,7 @@ def audit_run_data(run_id,expected_agent_ids=None,expected_task_count=None):
     task_ids=[e.get("task_id") for e in starts]
     for tid in sorted({x for x in task_ids if x}):
         if task_ids.count(tid)!=1:errors.append(f"duplicate task receipts: {tid}")
-    turns=[e for e in evs if e.get("event")=="turn_usage"]
+    turns,supersession_errors=effective_turn_usage(evs);errors.extend(supersession_errors)
     components=[c for turn in turns for c in turn.get("components",[])]
     if not turns:errors.append("missing turn_usage event")
     front_usage=[c for c in components if c.get("role")=="front_door" and c.get("token_source") in {"measured","estimated","unknown"}]

@@ -44,7 +44,7 @@ Treat each spawn or reactivation as a distinct task attempt, even when the same 
 1. Run `begin-task` immediately before the host spawn/reactivation call. It emits an append-only pre-spawn receipt and returns the task ID. If registration fails, **do not dispatch**.
 2. After a successful spawn, run `bind-task` with the returned agent ID. For reactivation, pass the already-known agent ID to `begin-task` and do not create a duplicate binding.
 3. After verification, run `finish-task` once. It appends the terminal event with the effective model/revision/reasoning, outcome, verification, retries/escalations, rework, and acceptance. Never mutate or replace the start receipt.
-4. Use `usage.py record-turn --task-usage` for measured/estimated counters or `--unknown-task-usage` when counters are unavailable. Unknown means null, never zero. Record front-door usage with `--usage` or `--unknown-usage` in the same run.
+4. After the worker completes, first use `usage.py record-turn --capture-task-usage <task-id>` to recover exact per-request counters from the bound child rollout. It attributes by lifecycle receipt, agent path, parent thread, and activation boundaries, and fails closed if the match is ambiguous or incomplete. Fall back to `--task-usage` when the host directly exposes counters, or `--unknown-task-usage` only when neither source is available. Unknown means null, never zero. Record front-door usage with `--usage` or `--unknown-usage` in the same run.
 5. Reconcile tool-visible agents with `audit-run --expected-agent-id ... --expected-task-count ...`. Then run `record-run`, which automatically repeats the lifecycle audit and refuses to summarize an incomplete managed run.
 
 The scripts cannot transactionally wrap a host-level spawn tool. The receipt-before-spawn ordering and fail-closed summary are therefore the enforceable boundary. A telemetry audit can detect unclosed receipts and runtime agents supplied to it; it cannot discover a raw spawn omitted from both telemetry and runtime expectations.
@@ -106,6 +106,8 @@ The learner maintains global and project-local evidence, recency weighting, run-
 
 Use `scripts/usage.py record-turn` to record usage for the front door and each materially used subagent separately. Lifecycle-managed worker components also identify `task_id`, so repeated activations of one agent remain auditable. Each component identifies agent ID, role, model, reasoning effort, and measured/estimated token counts or an explicit unknown state.
 
+The collaboration result packet may omit worker counters even though the local Codex child rollout contains them. `--capture-task-usage` reads only local rollout metadata, task boundaries, model settings, and `last_token_usage` counters; it does not persist prompts or responses. The current parent thread ID is used to prevent cross-thread agent-path collisions. If an unknown or malformed usage event was already appended, record the corrected complete turn with `--supersedes-turn-id <old-turn-id>` so audits and reports use only the effective replacement.
+
 The ledger derives credits from the local Codex rate card when a public numeric rate exists. A model with no numeric published rate remains unknown rather than being assigned a guessed price.
 
 At the end of each user-facing turn, use `scripts/usage.py footer` to surface a compact total plus per-subagent/model/effort breakdown. Use `scripts/usage.py report` for aggregate project reporting.
@@ -137,7 +139,7 @@ These commands exist for the skill/agent to initialize, reconcile, or repair its
 - `scripts/dispatch.py begin-task|bind-task|finish-task` — append the delegated-task lifecycle
 - `scripts/dispatch.py audit-run` — fail-closed lifecycle, runtime-agent, and usage reconciliation
 - `scripts/dispatch.py report` — front-door and frontier-use reporting
-- `scripts/usage.py record-turn` — per-task/per-agent measured, estimated, or unknown usage
+- `scripts/usage.py record-turn` — per-task/per-agent rollout-captured, directly measured, estimated, or unknown usage; supports append-only correction with `--supersedes-turn-id`
 - `scripts/usage.py footer` — compact end-of-turn usage + savings line
 - `scripts/usage.py report` — aggregate actual usage, route breakdown, and all-Sol/max counterfactual
 - `scripts/surface.py register-cell` — record a runtime-supported model×effort cell

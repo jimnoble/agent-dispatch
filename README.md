@@ -61,9 +61,11 @@ Runtime state lives by default at:
 
 `~/.codex/agent-dispatch/`
 
-Raw events are append-only JSONL; learned routing state is derived and inspectable. No telemetry is uploaded by this skill. Missing token/usage data stays unknown rather than being invented.
+Raw events are append-only JSONL; learned routing state is derived and inspectable. No telemetry is uploaded by this skill. Missing token/usage data stays unknown rather than being invented. When collaboration results omit worker counters, Agent Dispatch can recover exact per-request usage from the bound child's local Codex rollout using lifecycle, agent-path, parent-thread, and activation boundaries. Ambiguous or incomplete attribution fails closed to unknown.
 
 Managed delegation follows a receipt lifecycle: `begin-run` → `begin-task` before spawning → `bind-task` after the host returns an agent ID → `finish-task` after verification → task-aware usage → `audit-run` → `record-run`. Each reactivation gets a new task ID. The final summary automatically repeats the audit and refuses incomplete managed runs.
+
+For task-aware accounting, prefer `scripts/usage.py record-turn --capture-task-usage <task-id>` after `finish-task`. Use `--unknown-task-usage` only when the local rollout and host counters are both unavailable. Corrections remain append-only: a replacement turn can use `--supersedes-turn-id <old-turn-id>`, and reports and lifecycle audits exclude the superseded observation.
 
 The local scripts cannot atomically invoke Codex's host-level spawn tool. Enforcement therefore combines mandatory receipt-before-spawn instructions, an append-only lifecycle, runtime-agent reconciliation when IDs are available, and a fail-closed run summary. Backfilled telemetry is audit recovery, not compliant registration.
 
