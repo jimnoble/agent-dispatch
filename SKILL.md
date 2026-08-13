@@ -1,6 +1,6 @@
 ---
 name: agent-dispatch
-description: Optimize Codex work with adaptive subagent orchestration. Use for nontrivial coding or repository tasks that benefit from delegation, independent model/reasoning exploration, episodic frontier consultation, safe parallel work, context isolation, verification, telemetry, usage accounting, or learned repository defaults. Do not use for trivial single-step work where orchestration overhead dominates.
+description: Optimize Codex work with adaptive subagent orchestration, fail-closed dispatch receipts, and usage accounting. Use for nontrivial coding or repository tasks that benefit from delegation, independent model/reasoning exploration, episodic frontier consultation, safe parallel work, context isolation, verification, telemetry, usage accounting, or learned repository defaults. Do not use for trivial single-step work where orchestration overhead dominates.
 ---
 
 # Agent Dispatch
@@ -28,13 +28,28 @@ Reconciliation is deliberately scoped to the Agent Dispatch managed-resource reg
 2. Decide whether orchestration can materially reduce scarce-model usage, parent context, or critical-path time.
 3. Classify subtasks by task class, domain, reasoning need, write class, and delegation depth.
 4. Consult `scripts/dispatch.py recommend` for learned routing/execution policy and inspect `.agent-dispatch/defaults.json` when present in the repository.
-5. Treat **model choice and reasoning effort as independent variables**. Capability tiers are priors/safety envelopes, not a one-dimensional ladder.
-6. Delegate bounded work to the least-expensive capable route; use frontier reasoning episodically for planning, architecture, ambiguity, stubborn failures, conflicting evidence, or adjudication.
-7. Parallelize the dependency graph, not merely the task list. Read-only/non-repository work may run concurrently; repository mutations serialize by default unless the repository explicitly declares a tested isolation mechanism or the user explicitly opts into one.
-8. Verify, record delegated-task telemetry, record per-agent token/credit usage, and record a run summary for substantial runs.
-9. At the end of each user-facing turn, surface the compact Agent Dispatch usage footer when usage data can be recorded.
+5. Before the first substantive dispatch, create the run receipt with `scripts/dispatch.py begin-run`; retain its `run_id` for the entire user-facing run or milestone.
+6. Treat **model choice and reasoning effort as independent variables**. Capability tiers are priors/safety envelopes, not a one-dimensional ladder.
+7. Delegate bounded work to the least-expensive capable route; use frontier reasoning episodically for planning, architecture, ambiguity, stubborn failures, conflicting evidence, or adjudication.
+8. Parallelize the dependency graph, not merely the task list. Read-only/non-repository work may run concurrently; repository mutations serialize by default unless the repository explicitly declares a tested isolation mechanism or the user explicitly opts into one.
+9. Follow the fail-closed lifecycle below for every substantive spawn or reactivation.
+10. Before reporting completion, require a passing `audit-run`, append `record-run`, and surface the compact usage footer.
 
 Read `references/routing.md`, `references/parallel-safety.md`, `references/contracts.md`, and `references/learning.md` when their detail is needed.
+
+## Fail-closed delegated-task lifecycle
+
+Treat each spawn or reactivation as a distinct task attempt, even when the same agent ID is reused.
+
+1. Run `begin-task` immediately before the host spawn/reactivation call. It emits an append-only pre-spawn receipt and returns the task ID. If registration fails, **do not dispatch**.
+2. After a successful spawn, run `bind-task` with the returned agent ID. For reactivation, pass the already-known agent ID to `begin-task` and do not create a duplicate binding.
+3. After verification, run `finish-task` once. It appends the terminal event with the effective model/revision/reasoning, outcome, verification, retries/escalations, rework, and acceptance. Never mutate or replace the start receipt.
+4. Use `usage.py record-turn --task-usage` for measured/estimated counters or `--unknown-task-usage` when counters are unavailable. Unknown means null, never zero. Record front-door usage with `--usage` or `--unknown-usage` in the same run.
+5. Reconcile tool-visible agents with `audit-run --expected-agent-id ... --expected-task-count ...`. Then run `record-run`, which automatically repeats the lifecycle audit and refuses to summarize an incomplete managed run.
+
+The scripts cannot transactionally wrap a host-level spawn tool. The receipt-before-spawn ordering and fail-closed summary are therefore the enforceable boundary. A telemetry audit can detect unclosed receipts and runtime agents supplied to it; it cannot discover a raw spawn omitted from both telemetry and runtime expectations.
+
+Do not use raw spawning for substantive Agent Dispatch work without a receipt. The only emergency exception is urgent safety or containment work when telemetry itself is unavailable. Disclose the exception, backfill at the first safe opportunity, and label the backfill audit recovery rather than compliant registration. Do not report ordinary work complete under this exception.
 
 ## Managed temporary resources and crash recovery
 
@@ -83,13 +98,13 @@ Strongest evidence wins: deterministic tests/acceptance/benchmarks; independent 
 
 ## Telemetry and autonomous learning
 
-Use `scripts/dispatch.py record` for materially delegated tasks and `record-run` for substantial user-facing runs/milestones. Record measured usage when exposed and unknown otherwise. Include model/revision/reasoning, delegation and parallel metadata, frontier consultation/use, verification, retries/escalations, rework, and acceptance.
+Use `begin-run`, `begin-task`, `bind-task`, and `finish-task` for materially delegated tasks, and `record-run` for every substantial user-facing run or milestone. Raw telemetry is append-only: terminal events link to receipts by `run_id` and `task_id`; they never update prior records. Keep `record` only for legacy/unmanaged observations. Record measured usage when exposed and explicitly unknown otherwise.
 
 The learner maintains global and project-local evidence, recency weighting, run-level front-door comparisons, reviewer/concurrency/retry/escalation policy, and frontier-use accounting. `recommend` refreshes learned state before routing. Parallelism learning cannot override the worktree opt-in rule or other explicit write-safety constraints.
 
 ## Token, credit, and savings accounting
 
-Use `scripts/usage.py record-turn` to record usage for the front door and each materially used subagent separately. Each usage component identifies agent ID, role, model, reasoning effort, input tokens, cached-input tokens, output tokens, and whether those token counts are measured or estimated.
+Use `scripts/usage.py record-turn` to record usage for the front door and each materially used subagent separately. Lifecycle-managed worker components also identify `task_id`, so repeated activations of one agent remain auditable. Each component identifies agent ID, role, model, reasoning effort, and measured/estimated token counts or an explicit unknown state.
 
 The ledger derives credits from the local Codex rate card when a public numeric rate exists. A model with no numeric published rate remains unknown rather than being assigned a guessed price.
 
@@ -118,8 +133,11 @@ These commands exist for the skill/agent to initialize, reconcile, or repair its
 ## Useful commands
 
 - `scripts/dispatch.py recommend` / `explain` — routing and execution policy
+- `scripts/dispatch.py begin-run` — create a run receipt before the first dispatch
+- `scripts/dispatch.py begin-task|bind-task|finish-task` — append the delegated-task lifecycle
+- `scripts/dispatch.py audit-run` — fail-closed lifecycle, runtime-agent, and usage reconciliation
 - `scripts/dispatch.py report` — front-door and frontier-use reporting
-- `scripts/usage.py record-turn` — per-agent token/credit usage for a turn
+- `scripts/usage.py record-turn` — per-task/per-agent measured, estimated, or unknown usage
 - `scripts/usage.py footer` — compact end-of-turn usage + savings line
 - `scripts/usage.py report` — aggregate actual usage, route breakdown, and all-Sol/max counterfactual
 - `scripts/surface.py register-cell` — record a runtime-supported model×effort cell

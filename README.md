@@ -22,10 +22,12 @@ Agent Dispatch keeps your normal Codex model picker as the front door. Underneat
 - serialize repository mutations by default unless the repository explicitly provides a tested isolation mechanism or the user opts into one;
 - **never create Git worktrees by default**; worktrees are explicit opt-in and must follow managed lifecycle/recovery rules;
 - give workers narrow task packets instead of cloning giant parent contexts;
+- emit an append-only pre-spawn receipt before every substantive worker launch or reactivation, and stop dispatch if registration fails;
 - escalate early when a cheaper worker is out of its depth instead of paying for repeated failed attempts;
 - independently review consequential delegated work and require evidence rather than accepting a worker's `done`;
 - explore model choice and reasoning effort independently, including counterintuitive combinations when supported;
-- record local telemetry about routing, retries, escalation, rework, acceptance, duration, tokens, credits, and measured usage when available;
+- bind receipts to returned agent IDs, append terminal outcomes, and record measured, estimated, or explicitly unknown usage without inventing zeroes;
+- fail closed before completion when lifecycle, runtime-agent, usage, or run-summary coverage is incomplete;
 - report per-agent/model/effort usage and estimate savings against an all-frontier baseline;
 - autonomously tune future routing preferences from telemetry without weakening correctness requirements;
 - promote high-confidence burn-in discoveries into inspectable repository defaults;
@@ -60,6 +62,10 @@ Runtime state lives by default at:
 `~/.codex/agent-dispatch/`
 
 Raw events are append-only JSONL; learned routing state is derived and inspectable. No telemetry is uploaded by this skill. Missing token/usage data stays unknown rather than being invented.
+
+Managed delegation follows a receipt lifecycle: `begin-run` → `begin-task` before spawning → `bind-task` after the host returns an agent ID → `finish-task` after verification → task-aware usage → `audit-run` → `record-run`. Each reactivation gets a new task ID. The final summary automatically repeats the audit and refuses incomplete managed runs.
+
+The local scripts cannot atomically invoke Codex's host-level spawn tool. Enforcement therefore combines mandatory receipt-before-spawn instructions, an append-only lifecycle, runtime-agent reconciliation when IDs are available, and a fail-closed run summary. Backfilled telemetry is audit recovery, not compliant registration.
 
 Useful operations include routing recommendations, tuning, front-door performance reports, routing explanations, usage/savings reports, and resetting learned state while preserving raw telemetry.
 

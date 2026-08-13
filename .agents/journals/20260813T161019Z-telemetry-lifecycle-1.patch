@@ -1,0 +1,493 @@
+diff --git a/README.md b/README.md
+index 7f30bd4..dbf0adf 100644
+--- a/README.md
++++ b/README.md
+@@ -24,0 +25 @@ Agent Dispatch keeps your normal Codex model picker as the front door. Underneat
++- emit an append-only pre-spawn receipt before every substantive worker launch or reactivation, and stop dispatch if registration fails;
+@@ -28 +29,2 @@ Agent Dispatch keeps your normal Codex model picker as the front door. Underneat
+-- record local telemetry about routing, retries, escalation, rework, acceptance, duration, tokens, credits, and measured usage when available;
++- bind receipts to returned agent IDs, append terminal outcomes, and record measured, estimated, or explicitly unknown usage without inventing zeroes;
++- fail closed before completion when lifecycle, runtime-agent, usage, or run-summary coverage is incomplete;
+@@ -63,0 +66,4 @@ Raw events are append-only JSONL; learned routing state is derived and inspectab
++Managed delegation follows a receipt lifecycle: `begin-run` → `begin-task` before spawning → `bind-task` after the host returns an agent ID → `finish-task` after verification → task-aware usage → `audit-run` → `record-run`. Each reactivation gets a new task ID. The final summary automatically repeats the audit and refuses incomplete managed runs.
++
++The local scripts cannot atomically invoke Codex's host-level spawn tool. Enforcement therefore combines mandatory receipt-before-spawn instructions, an append-only lifecycle, runtime-agent reconciliation when IDs are available, and a fail-closed run summary. Backfilled telemetry is audit recovery, not compliant registration.
++
+diff --git a/SKILL.md b/SKILL.md
+index 7c68260..3a241e6 100644
+--- a/SKILL.md
++++ b/SKILL.md
+@@ -3 +3 @@ name: agent-dispatch
+-description: Optimize Codex work with adaptive subagent orchestration. Use for nontrivial coding or repository tasks that benefit from delegation, independent model/reasoning exploration, episodic frontier consultation, safe parallel work, context isolation, verification, telemetry, usage accounting, or learned repository defaults. Do not use for trivial single-step work where orchestration overhead dominates.
++description: Optimize Codex work with adaptive subagent orchestration, fail-closed dispatch receipts, and usage accounting. Use for nontrivial coding or repository tasks that benefit from delegation, independent model/reasoning exploration, episodic frontier consultation, safe parallel work, context isolation, verification, telemetry, usage accounting, or learned repository defaults. Do not use for trivial single-step work where orchestration overhead dominates.
+@@ -31,5 +31,6 @@ Reconciliation is deliberately scoped to the Agent Dispatch managed-resource reg
+-5. Treat **model choice and reasoning effort as independent variables**. Capability tiers are priors/safety envelopes, not a one-dimensional ladder.
+-6. Delegate bounded work to the least-expensive capable route; use frontier reasoning episodically for planning, architecture, ambiguity, stubborn failures, conflicting evidence, or adjudication.
+-7. Parallelize the dependency graph, not merely the task list. Read-only/non-repository work may run concurrently; repository mutations serialize by default unless the repository explicitly declares a tested isolation mechanism or the user explicitly opts into one.
+-8. Verify, record delegated-task telemetry, record per-agent token/credit usage, and record a run summary for substantial runs.
+-9. At the end of each user-facing turn, surface the compact Agent Dispatch usage footer when usage data can be recorded.
++5. Before the first substantive dispatch, create the run receipt with `scripts/dispatch.py begin-run`; retain its `run_id` for the entire user-facing run or milestone.
++6. Treat **model choice and reasoning effort as independent variables**. Capability tiers are priors/safety envelopes, not a one-dimensional ladder.
++7. Delegate bounded work to the least-expensive capable route; use frontier reasoning episodically for planning, architecture, ambiguity, stubborn failures, conflicting evidence, or adjudication.
++8. Parallelize the dependency graph, not merely the task list. Read-only/non-repository work may run concurrently; repository mutations serialize by default unless the repository explicitly declares a tested isolation mechanism or the user explicitly opts into one.
++9. Follow the fail-closed lifecycle below for every substantive spawn or reactivation.
++10. Before reporting completion, require a passing `audit-run`, append `record-run`, and surface the compact usage footer.
+@@ -38,0 +40,14 @@ Read `references/routing.md`, `references/parallel-safety.md`, `references/contr
++## Fail-closed delegated-task lifecycle
++
++Treat each spawn or reactivation as a distinct task attempt, even when the same agent ID is reused.
++
++1. Run `begin-task` immediately before the host spawn/reactivation call. It emits an append-only pre-spawn receipt and returns the task ID. If registration fails, **do not dispatch**.
++2. After a successful spawn, run `bind-task` with the returned agent ID. For reactivation, pass the already-known agent ID to `begin-task` and do not create a duplicate binding.
++3. After verification, run `finish-task` once. It appends the terminal event with the effective model/revision/reasoning, outcome, verification, retries/escalations, rework, and acceptance. Never mutate or replace the start receipt.
++4. Use `usage.py record-turn --task-usage` for measured/estimated counters or `--unknown-task-usage` when counters are unavailable. Unknown means null, never zero. Record front-door usage with `--usage` or `--unknown-usage` in the same run.
++5. Reconcile tool-visible agents with `audit-run --expected-agent-id ... --expected-task-count ...`. Then run `record-run`, which automatically repeats the lifecycle audit and refuses to summarize an incomplete managed run.
++
++The scripts cannot transactionally wrap a host-level spawn tool. The receipt-before-spawn ordering and fail-closed summary are therefore the enforceable boundary. A telemetry audit can detect unclosed receipts and runtime agents supplied to it; it cannot discover a raw spawn omitted from both telemetry and runtime expectations.
++
++Do not use raw spawning for substantive Agent Dispatch work without a receipt. The only emergency exception is urgent safety or containment work when telemetry itself is unavailable. Disclose the exception, backfill at the first safe opportunity, and label the backfill audit recovery rather than compliant registration. Do not report ordinary work complete under this exception.
++
+@@ -86 +101 @@ Strongest evidence wins: deterministic tests/acceptance/benchmarks; independent
+-Use `scripts/dispatch.py record` for materially delegated tasks and `record-run` for substantial user-facing runs/milestones. Record measured usage when exposed and unknown otherwise. Include model/revision/reasoning, delegation and parallel metadata, frontier consultation/use, verification, retries/escalations, rework, and acceptance.
++Use `begin-run`, `begin-task`, `bind-task`, and `finish-task` for materially delegated tasks, and `record-run` for every substantial user-facing run or milestone. Raw telemetry is append-only: terminal events link to receipts by `run_id` and `task_id`; they never update prior records. Keep `record` only for legacy/unmanaged observations. Record measured usage when exposed and explicitly unknown otherwise.
+@@ -92 +107 @@ The learner maintains global and project-local evidence, recency weighting, run-
+-Use `scripts/usage.py record-turn` to record usage for the front door and each materially used subagent separately. Each usage component identifies agent ID, role, model, reasoning effort, input tokens, cached-input tokens, output tokens, and whether those token counts are measured or estimated.
++Use `scripts/usage.py record-turn` to record usage for the front door and each materially used subagent separately. Lifecycle-managed worker components also identify `task_id`, so repeated activations of one agent remain auditable. Each component identifies agent ID, role, model, reasoning effort, and measured/estimated token counts or an explicit unknown state.
+@@ -120,0 +136,3 @@ These commands exist for the skill/agent to initialize, reconcile, or repair its
++- `scripts/dispatch.py begin-run` — create a run receipt before the first dispatch
++- `scripts/dispatch.py begin-task|bind-task|finish-task` — append the delegated-task lifecycle
++- `scripts/dispatch.py audit-run` — fail-closed lifecycle, runtime-agent, and usage reconciliation
+@@ -122 +140 @@ These commands exist for the skill/agent to initialize, reconcile, or repair its
+-- `scripts/usage.py record-turn` — per-agent token/credit usage for a turn
++- `scripts/usage.py record-turn` — per-task/per-agent measured, estimated, or unknown usage
+diff --git a/agents/openai.yaml b/agents/openai.yaml
+index dd84b8c..7b4690b 100644
+--- a/agents/openai.yaml
++++ b/agents/openai.yaml
+@@ -3,2 +3,2 @@ interface:
+-  short_description: "Adaptive subagent routing, parallelism, and telemetry"
+-  default_prompt: "Use Agent Dispatch to decompose this work, route bounded subtasks to the least-expensive capable agents, parallelize safely, escalate when needed, verify results, and learn from telemetry."
++  short_description: "Fail-closed adaptive subagent routing and telemetry"
++  default_prompt: "Use $agent-dispatch to route and verify substantive delegated work with pre-spawn receipts, append-only usage telemetry, and fail-closed completion audits."
+diff --git a/references/learning.md b/references/learning.md
+index 256f7ee..c19dd12 100644
+--- a/references/learning.md
++++ b/references/learning.md
+@@ -9 +9,3 @@ Global state lives under `~/.codex/agent-dispatch/`: `telemetry.jsonl` (raw even
+-`delegated_task` records child/subtree outcomes; `run_summary` records whole front-door runs so highly delegated jobs do not count as many independent front-door experiments.
++`run_started` identifies a managed user-facing run. `delegated_task_started` is the immutable pre-spawn receipt, `delegated_task_bound` attaches the host-returned agent ID, and `delegated_task` records the terminal child/subtree outcome. Only terminal `delegated_task` events feed the learner. `turn_usage` links task-aware usage by `run_id` and `task_id`; `run_summary` records whole front-door runs so highly delegated jobs do not count as many independent front-door experiments.
++
++Every substantive spawn or reactivation gets a distinct task receipt before the host call. Terminal outcomes and usage append new events rather than mutating that receipt. A lifecycle audit requires exactly one terminal outcome and one task-aware measured, estimated, or explicitly unknown usage component for each spawned receipt. A receipt closed as not spawned requires no worker usage. Runtime agent IDs and the expected task count should be supplied to the audit whenever the host exposes them, because the ledger alone cannot detect a spawn that bypassed registration entirely.
+diff --git a/scripts/bootstrap_agents.py b/scripts/bootstrap_agents.py
+index d8748d3..697f7f4 100644
+--- a/scripts/bootstrap_agents.py
++++ b/scripts/bootstrap_agents.py
+@@ -4,0 +5 @@ import os
++import re
+@@ -12,0 +14,2 @@ For nontrivial work, consider whether subagent delegation, cheaper model/reasoni
++
++For substantive delegated work, never launch or reactivate a raw subagent until Agent Dispatch has emitted a pre-spawn receipt containing run and task IDs; if registration fails, stop dispatch. Bind the returned agent ID, append the terminal outcome and measured/estimated/unknown usage, then require a passing telemetry audit and run summary before reporting completion. The only emergency exception is urgent safety or containment work when telemetry itself is unavailable: disclose it, backfill at the first safe opportunity, and classify the backfill as audit recovery rather than compliant registration.
+@@ -20,0 +24,7 @@ def target() -> Path:
++def bump_global_version(text: str) -> str:
++    match = re.search(r"(?m)^(# Global AGENTS\.md V)(\d+)[ \t]*$", text)
++    if not match:
++        return text
++    return text[:match.start()] + f"{match.group(1)}{int(match.group(2)) + 1}" + text[match.end():]
++
++
+@@ -37,0 +48 @@ def main() -> int:
++        new = bump_global_version(new)
+diff --git a/scripts/dispatch.py b/scripts/dispatch.py
+index b98eb25..60d1002 100644
+--- a/scripts/dispatch.py
++++ b/scripts/dispatch.py
+@@ -4 +4 @@ from __future__ import annotations
+-import argparse, datetime as dt, json, os, statistics, sys
++import argparse, datetime as dt, json, os, statistics, sys, uuid
+@@ -8 +8 @@ from pathlib import Path
+-SCHEMA=2
++SCHEMA=3
+@@ -51 +51,2 @@ def append_event(e):
+-    with t.open("a") as f:f.write(json.dumps(e,sort_keys=True)+"\n")
++    with t.open("a") as f:
++        f.write(json.dumps(e,sort_keys=True)+"\n");f.flush();os.fsync(f.fileno())
+@@ -91,0 +93,127 @@ def maybe_tune():
++def run_events(run_id):return [e for e in all_events() if e.get("run_id")==run_id]
++def require_one(events,label):
++    if len(events)!=1:raise SystemExit(f"Expected exactly one {label}; found {len(events)}")
++    return events[0]
++def lifecycle_start(run_id,task_id):
++    return require_one([e for e in run_events(run_id) if e.get("event")=="delegated_task_started" and e.get("task_id")==task_id],f"start receipt for task {task_id}")
++
++def begin_run(a):
++    rid=a.run_id or str(uuid.uuid4())
++    if any(e.get("run_id")==rid for e in all_events()):raise SystemExit(f"Run ID already exists: {rid}")
++    e={"schema":SCHEMA,"timestamp":a.timestamp or now_iso(),"event":"run_started","run_id":rid,"project":a.project,
++       "front_door_model":a.front_door_model,"front_door_revision":a.front_door_revision,
++       "front_door_reasoning":a.front_door_reasoning,"skill_version":a.skill_version,"notes":a.notes}
++    print(json.dumps(append_event(e),indent=2,sort_keys=True))
++
++def begin_task(a):
++    evs=run_events(a.run_id);run=require_one([e for e in evs if e.get("event")=="run_started"],f"run start for {a.run_id}")
++    if any(e.get("event")=="run_summary" for e in evs):raise SystemExit(f"Run is already summarized: {a.run_id}")
++    tid=a.task_id or str(uuid.uuid4())
++    if any(e.get("task_id")==tid for e in evs):raise SystemExit(f"Task ID already exists in run {a.run_id}: {tid}")
++    e={"schema":SCHEMA,"timestamp":a.timestamp or now_iso(),"event":"delegated_task_started","lifecycle_managed":True,
++       "receipt_status":"pre_spawn","task_id":tid,"run_id":a.run_id,"parent_task_id":a.parent_task_id,
++       "agent_id":a.agent_id,"project":a.project or run.get("project"),"task_class":a.task_class,"domain":a.domain,
++       "front_door_model":run.get("front_door_model"),"front_door_revision":run.get("front_door_revision"),
++       "front_door_reasoning":run.get("front_door_reasoning"),"requested_worker_model":a.worker_model,
++       "requested_worker_revision":a.worker_revision,"requested_worker_reasoning":a.worker_reasoning,"tier":a.tier,
++       "delegation_depth":a.delegation_depth,"parallel":a.parallel,"parallel_group_size":a.parallel_group_size,
++       "write_class":a.write_class,"shadow":a.shadow,"consultation_mode":a.consultation_mode,
++       "skill_version":a.skill_version or run.get("skill_version"),"notes":a.notes}
++    print(json.dumps(append_event(e),indent=2,sort_keys=True))
++
++def bind_task(a):
++    start=lifecycle_start(a.run_id,a.task_id);evs=run_events(a.run_id)
++    if any(e.get("event")=="delegated_task" and e.get("task_id")==a.task_id for e in evs):raise SystemExit(f"Task is already finished: {a.task_id}")
++    if start.get("agent_id"):raise SystemExit(f"Task already has agent ID {start['agent_id']}: {a.task_id}")
++    if any(e.get("event")=="delegated_task_bound" and e.get("task_id")==a.task_id for e in evs):raise SystemExit(f"Task is already bound: {a.task_id}")
++    e={"schema":SCHEMA,"timestamp":a.timestamp or now_iso(),"event":"delegated_task_bound","lifecycle_managed":True,
++       "run_id":a.run_id,"task_id":a.task_id,"agent_id":a.agent_id}
++    print(json.dumps(append_event(e),indent=2,sort_keys=True))
++
++def finish_task(a):
++    start=lifecycle_start(a.run_id,a.task_id);evs=run_events(a.run_id)
++    if any(e.get("event")=="delegated_task" and e.get("task_id")==a.task_id for e in evs):raise SystemExit(f"Task is already finished: {a.task_id}")
++    binds=[e for e in evs if e.get("event")=="delegated_task_bound" and e.get("task_id")==a.task_id]
++    if len(binds)>1:raise SystemExit(f"Task has duplicate agent bindings: {a.task_id}")
++    ids={x for x in (start.get("agent_id"),binds[0].get("agent_id") if binds else None,a.agent_id) if x}
++    if len(ids)>1:raise SystemExit(f"Task has conflicting agent IDs: {a.task_id}")
++    agent_id=next(iter(ids),None);spawned=True if a.spawned is None else a.spawned
++    if spawned and not agent_id:raise SystemExit("A spawned task must be bound to an agent ID before it can finish")
++    if not spawned and agent_id:raise SystemExit("A not-spawned task cannot have an agent ID")
++    if not spawned and a.outcome not in {"blocked","fail"}:raise SystemExit("A not-spawned task must finish blocked or fail")
++    e={"schema":SCHEMA,"timestamp":a.timestamp or now_iso(),"event":"delegated_task","lifecycle_managed":True,
++       "task_id":a.task_id,"run_id":a.run_id,"parent_task_id":start.get("parent_task_id"),"agent_id":agent_id,
++       "spawned":spawned,"project":start.get("project"),"task_class":start.get("task_class"),"domain":start.get("domain"),
++       "front_door_model":start.get("front_door_model"),"front_door_revision":start.get("front_door_revision"),
++       "front_door_reasoning":start.get("front_door_reasoning"),"requested_worker_model":start.get("requested_worker_model"),
++       "requested_worker_revision":start.get("requested_worker_revision"),"requested_worker_reasoning":start.get("requested_worker_reasoning"),
++       "worker_model":a.actual_worker_model or start.get("requested_worker_model"),
++       "worker_revision":a.actual_worker_revision or start.get("requested_worker_revision"),
++       "worker_reasoning":a.actual_worker_reasoning or start.get("requested_worker_reasoning"),"tier":start.get("tier"),
++       "delegation_depth":start.get("delegation_depth",0),"parallel":start.get("parallel"),
++       "parallel_group_size":start.get("parallel_group_size"),"parallel_collision":a.parallel_collision,
++       "write_class":start.get("write_class"),"shadow":start.get("shadow"),"consultation_mode":start.get("consultation_mode"),
++       "frontier_use":a.frontier_use,"frontier_calls":a.frontier_calls,"duration_s":a.duration_s,
++       "input_tokens":a.input_tokens,"output_tokens":a.output_tokens,"usage_source":a.usage_source,
++       "retries":a.retries,"escalations":a.escalations,"review_pass":a.review_pass,"tests_pass":a.tests_pass,
++       "rework":a.rework,"accepted":a.accepted,"outcome":a.outcome,"notes":a.notes,
++       "skill_version":start.get("skill_version")}
++    print(json.dumps(append_event(e),indent=2,sort_keys=True));maybe_tune()
++
++def audit_run_data(run_id,expected_agent_ids=None,expected_task_count=None):
++    evs=run_events(run_id);errors=[];warnings=[]
++    run_starts=[e for e in evs if e.get("event")=="run_started"]
++    if len(run_starts)!=1:errors.append(f"expected one run_started event; found {len(run_starts)}")
++    starts=[e for e in evs if e.get("event")=="delegated_task_started"]
++    if expected_task_count is not None and len(starts)!=expected_task_count:errors.append(f"expected {expected_task_count} task receipts; found {len(starts)}")
++    task_ids=[e.get("task_id") for e in starts]
++    for tid in sorted({x for x in task_ids if x}):
++        if task_ids.count(tid)!=1:errors.append(f"duplicate task receipts: {tid}")
++    turns=[e for e in evs if e.get("event")=="turn_usage"]
++    components=[c for turn in turns for c in turn.get("components",[])]
++    if not turns:errors.append("missing turn_usage event")
++    front_usage=[c for c in components if c.get("role")=="front_door" and c.get("token_source") in {"measured","estimated","unknown"}]
++    if turns and not front_usage:errors.append("missing measured, estimated, or unknown front-door usage component")
++    for c in front_usage:
++        source=c.get("token_source");vals=[c.get(k) for k in ("input_tokens","cached_input_tokens","output_tokens")]
++        if source=="unknown" and any(v is not None for v in vals):errors.append("unknown front-door usage must not contain token counts")
++        if source in {"measured","estimated"} and any(not isinstance(v,int) or v<0 for v in vals):errors.append("known front-door usage requires non-negative integer token counts")
++    observed_agents=set();unknown_usage=0;completed=0
++    for start in starts:
++        tid=start.get("task_id");terms=[e for e in evs if e.get("event")=="delegated_task" and e.get("task_id")==tid]
++        if len(terms)!=1:
++            errors.append(f"task {tid} has {len(terms)} terminal events; expected 1");continue
++        completed+=1;term=terms[0];binds=[e for e in evs if e.get("event")=="delegated_task_bound" and e.get("task_id")==tid]
++        if len(binds)>1:errors.append(f"task {tid} has duplicate agent bindings")
++        ids={x for x in (start.get("agent_id"),*(e.get("agent_id") for e in binds),term.get("agent_id")) if x}
++        if len(ids)>1:errors.append(f"task {tid} has conflicting agent IDs")
++        agent_id=next(iter(ids),None);spawned=term.get("spawned",True)
++        if spawned and not agent_id:errors.append(f"task {tid} is spawned but unbound")
++        if agent_id:observed_agents.add(agent_id)
++        task_usage=[c for c in components if c.get("task_id")==tid]
++        if spawned and len(task_usage)!=1:errors.append(f"task {tid} has {len(task_usage)} task-aware usage components; expected 1")
++        if not spawned and task_usage:errors.append(f"task {tid} was not spawned but has usage")
++        if task_usage:
++            c=task_usage[0];source=c.get("token_source")
++            if c.get("agent_id")!=agent_id:errors.append(f"task {tid} usage agent ID does not match its binding")
++            if source not in {"measured","estimated","unknown"}:errors.append(f"task {tid} has invalid token source {source!r}")
++            if source=="unknown":
++                unknown_usage+=1
++                if any(c.get(k) is not None for k in ("input_tokens","cached_input_tokens","output_tokens")):errors.append(f"task {tid} unknown usage must not contain token counts")
++            elif source in {"measured","estimated"}:
++                vals=[c.get(k) for k in ("input_tokens","cached_input_tokens","output_tokens")]
++                if any(not isinstance(v,int) or v<0 for v in vals):errors.append(f"task {tid} known usage requires non-negative integer token counts")
++    expected=set(expected_agent_ids or [])
++    if expected:
++        for aid in sorted(expected-observed_agents):errors.append(f"expected runtime agent is missing from receipts: {aid}")
++        for aid in sorted(observed_agents-expected):errors.append(f"receipt agent is missing from runtime expectations: {aid}")
++    summaries=[e for e in evs if e.get("event")=="run_summary"]
++    if len(summaries)>1:errors.append(f"duplicate run summaries: {len(summaries)}")
++    return {"ok":not errors,"run_id":run_id,"task_receipts":len(starts),"completed_tasks":completed,
++            "observed_agent_ids":sorted(observed_agents),"unknown_usage_tasks":unknown_usage,"errors":errors,"warnings":warnings}
++
++def audit_run(a):
++    result=audit_run_data(a.run_id,a.expected_agent_id,a.expected_task_count)
++    print(json.dumps(result,indent=2,sort_keys=True))
++    if not result["ok"]:raise SystemExit(1)
++
+@@ -92,0 +221,2 @@ def record_task(a):
++    if a.run_id and any(e.get("event")=="delegated_task_started" and e.get("task_id")==a.task_id for e in run_events(a.run_id)):
++        raise SystemExit("Lifecycle-managed tasks must be finalized with finish-task")
+@@ -94 +224 @@ def record_task(a):
+-       "run_id":a.run_id,"parent_task_id":a.parent_task_id,"project":a.project,"task_class":a.task_class,"domain":a.domain,
++       "run_id":a.run_id,"parent_task_id":a.parent_task_id,"agent_id":a.agent_id,"project":a.project,"task_class":a.task_class,"domain":a.domain,
+@@ -104,0 +235,12 @@ def record_run(a):
++    evs=run_events(a.run_id)
++    if any(e.get("event")=="run_summary" for e in evs):raise SystemExit(f"Run is already summarized: {a.run_id}")
++    managed=any(e.get("event")=="run_started" for e in evs);audit=None
++    if managed:
++        expected_count=a.expected_task_count if a.expected_task_count is not None else a.delegated_tasks
++        if expected_count is None:raise SystemExit("Managed run summaries require --delegated-tasks or --expected-task-count")
++        spawned_ids={e.get("agent_id") for e in evs if e.get("event")=="delegated_task" and e.get("spawned",True) and e.get("agent_id")}
++        if spawned_ids and not a.expected_agent_id:raise SystemExit("Managed run summaries with spawned tasks require --expected-agent-id for runtime reconciliation")
++        audit=audit_run_data(a.run_id,a.expected_agent_id,expected_count)
++        if not audit["ok"]:
++            print(json.dumps(audit,indent=2,sort_keys=True),file=sys.stderr)
++            raise SystemExit("Refusing to summarize run because telemetry audit failed")
+@@ -110 +252,2 @@ def record_run(a):
+-       "review_pass":a.review_pass,"outcome":a.outcome,"skill_version":a.skill_version,"notes":a.notes}
++       "review_pass":a.review_pass,"outcome":a.outcome,"skill_version":a.skill_version,"notes":a.notes,
++       "telemetry_audit":"pass" if managed else None}
+@@ -233,0 +377,16 @@ def parser():
++    br=s.add_parser("begin-run")
++    for x in ("run-id","project","front-door-model","front-door-revision","front-door-reasoning","skill-version","notes","timestamp"):br.add_argument("--"+x)
++    br.set_defaults(func=begin_run)
++    bt=s.add_parser("begin-task")
++    for x,req in (("run-id",True),("task-id",False),("parent-task-id",False),("agent-id",False),("project",False),("task-class",True),("domain",False),("worker-model",False),("worker-revision",False),("worker-reasoning",False),("skill-version",False),("notes",False),("timestamp",False)):bt.add_argument("--"+x,required=req)
++    bt.add_argument("--tier",choices=TIERS,required=True);bt.add_argument("--delegation-depth",type=int,default=0)
++    for x in ("parallel","shadow"):bt.add_argument("--"+x,type=boolish)
++    bt.add_argument("--parallel-group-size",type=int);bt.add_argument("--write-class",choices=["read_only","write_isolated","write_shared"]);bt.add_argument("--consultation-mode",choices=["plan","consult","subtree","adjudicate"]);bt.set_defaults(func=begin_task)
++    bind=s.add_parser("bind-task");bind.add_argument("--run-id",required=True);bind.add_argument("--task-id",required=True);bind.add_argument("--agent-id",required=True);bind.add_argument("--timestamp");bind.set_defaults(func=bind_task)
++    ft=s.add_parser("finish-task")
++    for x in ("run-id","task-id"):ft.add_argument("--"+x,required=True)
++    for x in ("agent-id","actual-worker-model","actual-worker-revision","actual-worker-reasoning","notes","timestamp"):ft.add_argument("--"+x)
++    for x in ("spawned","parallel-collision","review-pass","tests-pass","rework","accepted"):ft.add_argument("--"+x,type=boolish)
++    ft.add_argument("--frontier-use",choices=["necessary","rescue","avoidable","unknown"]);ft.add_argument("--frontier-calls",type=int,default=0);ft.add_argument("--duration-s",type=float);ft.add_argument("--input-tokens",type=int);ft.add_argument("--output-tokens",type=int)
++    ft.add_argument("--usage-source",choices=["measured","derived","unknown"],default="unknown");ft.add_argument("--retries",type=int,default=0);ft.add_argument("--escalations",type=int,default=0);ft.add_argument("--outcome",choices=["pass","partial","blocked","fail"],required=True);ft.set_defaults(func=finish_task)
++    ar=s.add_parser("audit-run");ar.add_argument("--run-id",required=True);ar.add_argument("--expected-agent-id",action="append");ar.add_argument("--expected-task-count",type=int);ar.set_defaults(func=audit_run)
+@@ -235 +394 @@ def parser():
+-    for x,req in (("task-id",True),("run-id",False),("parent-task-id",False),("project",False),("task-class",True),("domain",False),("front-door-model",False),("front-door-revision",False),("front-door-reasoning",False),("worker-model",False),("worker-revision",False),("worker-reasoning",False),("skill-version",False),("notes",False),("timestamp",False)):r.add_argument("--"+x,required=req)
++    for x,req in (("task-id",True),("run-id",False),("parent-task-id",False),("agent-id",False),("project",False),("task-class",True),("domain",False),("front-door-model",False),("front-door-revision",False),("front-door-reasoning",False),("worker-model",False),("worker-revision",False),("worker-reasoning",False),("skill-version",False),("notes",False),("timestamp",False)):r.add_argument("--"+x,required=req)
+@@ -242,0 +402 @@ def parser():
++    rr.add_argument("--expected-agent-id",action="append");rr.add_argument("--expected-task-count",type=int)
+diff --git a/scripts/usage.py b/scripts/usage.py
+index 01fc558..bb17f8e 100644
+--- a/scripts/usage.py
++++ b/scripts/usage.py
+@@ -7 +7,2 @@ from pathlib import Path
+-SCHEMA=2
++SCHEMA=3
++RATE_CARD_SCHEMA=2
+@@ -23 +24 @@ def rates():
+- if not p.exists():p.write_text(json.dumps({"schema":SCHEMA,"as_of":RATE_CARD_AS_OF,"source":RATE_CARD_SOURCE,"rates":DEFAULT_RATES},indent=2,sort_keys=True)+"\n")
++ if not p.exists():p.write_text(json.dumps({"schema":RATE_CARD_SCHEMA,"as_of":RATE_CARD_AS_OF,"source":RATE_CARD_SOURCE,"rates":DEFAULT_RATES},indent=2,sort_keys=True)+"\n")
+@@ -34 +35,2 @@ def append(e):
+- with p.open("a") as f:f.write(json.dumps(e,sort_keys=True)+"\n")
++ with p.open("a") as f:
++  f.write(json.dumps(e,sort_keys=True)+"\n");f.flush();os.fsync(f.fileno())
+@@ -41,0 +44 @@ def parse_usage(s):
++ if any(not x for x in p[:4]):raise argparse.ArgumentTypeError("agent_id, role, model, and effort are required")
+@@ -44,0 +48 @@ def parse_usage(s):
++ if any(v<0 for v in (i,c,o)):raise argparse.ArgumentTypeError("token counts must be non-negative")
+@@ -45,0 +50,19 @@ def parse_usage(s):
++def parse_task_usage(s):
++ p=[x.strip() for x in s.split(",")]
++ if len(p)!=9:raise argparse.ArgumentTypeError("task usage must be task_id,agent_id,role,model,effort,input,cached_input,output,measured|estimated")
++ if not p[0]:raise argparse.ArgumentTypeError("task_id is required")
++ x=parse_usage(",".join(p[1:]));x["task_id"]=p[0];return x
++def parse_unknown(s,task_aware=False):
++ p=[x.strip() for x in s.split(",")]
++ minimum=5 if task_aware else 4
++ if len(p) not in {minimum,minimum+1}:raise argparse.ArgumentTypeError(("unknown task usage" if task_aware else "unknown usage")+" has an invalid field count")
++ offset=1 if task_aware else 0
++ if task_aware and not p[0]:raise argparse.ArgumentTypeError("task_id is required")
++ if any(not x for x in p[offset:offset+4]):raise argparse.ArgumentTypeError("agent_id, role, model, and effort are required")
++ x={"agent_id":p[offset],"role":p[offset+1],"model":p[offset+2],"effort":p[offset+3],"token_source":"unknown",
++    "input_tokens":None,"cached_input_tokens":None,"output_tokens":None}
++ if task_aware:x["task_id"]=p[0]
++ if len(p)==minimum+1:x["unknown_reason"]=p[-1]
++ return x
++def parse_unknown_usage(s):return parse_unknown(s,False)
++def parse_unknown_task_usage(s):return parse_unknown(s,True)
+@@ -55 +78,2 @@ def record(a):
+- for u in a.usage or []:
++ known=list(a.usage or [])+list(a.task_usage or [])
++ for u in known:
+@@ -62,0 +87,2 @@ def record(a):
++ for u in list(a.unknown_usage or [])+list(a.unknown_task_usage or []):
++  comps.append(dict(u));actual_complete=False;base_complete=False
+@@ -66 +92 @@ def record(a):
+- actual=a.measured_credits if a.measured_credits is not None else (actual_known if a.usage and actual_complete else None)
++ actual=a.measured_credits if a.measured_credits is not None else (actual_known if known and actual_complete else None)
+@@ -68 +94 @@ def record(a):
+- baseline=base_known if a.usage and base_complete else None
++ baseline=base_known if known and base_complete else None
+@@ -70 +96 @@ def record(a):
+- src={x.get("token_source") for x in comps if x.get("token_source")};token_source="measured" if src=={"measured"} else ("estimated" if src=={"estimated"} else ("mixed" if src else "unknown"))
++ src={x.get("token_source") for x in comps if x.get("token_source")};token_source="measured" if src=={"measured"} else ("estimated" if src=={"estimated"} else ("unknown" if src=={"unknown"} or not src else "mixed"))
+@@ -72 +98 @@ def record(a):
+- "components":comps,"token_total":tok if a.usage else None,"token_source":token_source,"credit_total":actual,"credit_source":actual_source,"baseline":{"model":a.baseline_model,"effort":"max","token_multiplier":a.baseline_token_multiplier,"method":"same-token-mix rate counterfactual"},"baseline_credits":baseline,"estimated_credit_savings":savings,"estimated_savings_pct":savings_pct,"rate_card_as_of":card.get("as_of"),"notes":a.notes}
++ "components":comps,"token_total":tok if known and all(x.get("token_source")!="unknown" for x in comps) else None,"token_source":token_source,"credit_total":actual,"credit_source":actual_source,"baseline":{"model":a.baseline_model,"effort":"max","token_multiplier":a.baseline_token_multiplier,"method":"same-token-mix rate counterfactual"},"baseline_credits":baseline,"estimated_credit_savings":savings,"estimated_savings_pct":savings_pct,"rate_card_as_of":card.get("as_of"),"notes":a.notes}
+@@ -82 +108 @@ def summarize(xs):
+- agents=defaultdict(lambda:{"turns":set(),"input":0,"cached":0,"output":0,"credits":0.,"credits_complete":True,"baseline":0.,"baseline_complete":True})
++ agents=defaultdict(lambda:{"turns":set(),"input":0,"cached":0,"output":0,"tokens_complete":True,"credits":0.,"credits_complete":True,"baseline":0.,"baseline_complete":True})
+@@ -85,2 +111,5 @@ def summarize(xs):
+-   if "input_tokens" not in x:continue
+-   k=f'{x.get("agent_id","unknown")}:{x.get("role","worker")}:{x.get("model","unknown")}/{x.get("effort","unknown")}' ;d=agents[k];d["turns"].add(e.get("turn_id"));d["input"]+=x["input_tokens"];d["cached"]+=x["cached_input_tokens"];d["output"]+=x["output_tokens"]
++   if not x.get("agent_id") or not x.get("token_source"):continue
++   k=f'{x.get("agent_id","unknown")}:{x.get("role","worker")}:{x.get("model","unknown")}/{x.get("effort","unknown")}' ;d=agents[k];d["turns"].add(e.get("turn_id"))
++   vals=[x.get("input_tokens"),x.get("cached_input_tokens"),x.get("output_tokens")]
++   if any(v is None for v in vals):d["tokens_complete"]=False
++   else:d["input"]+=vals[0];d["cached"]+=vals[1];d["output"]+=vals[2]
+@@ -93 +122 @@ def summarize(xs):
+-  rows.append({"subagent_route":k,"turns":len(d["turns"]),"input_tokens":d["input"],"cached_input_tokens":d["cached"],"output_tokens":d["output"],"total_tokens":d["input"]+d["cached"]+d["output"],"credits":round(d["credits"],3) if d["credits_complete"] else None,"sol_max_same_token_credits":round(d["baseline"],3) if d["baseline_complete"] else None})
++  rows.append({"subagent_route":k,"turns":len(d["turns"]),"input_tokens":d["input"] if d["tokens_complete"] else None,"cached_input_tokens":d["cached"] if d["tokens_complete"] else None,"output_tokens":d["output"] if d["tokens_complete"] else None,"total_tokens":d["input"]+d["cached"]+d["output"] if d["tokens_complete"] else None,"token_counts_complete":d["tokens_complete"],"credits":round(d["credits"],3) if d["credits_complete"] else None,"sol_max_same_token_credits":round(d["baseline"],3) if d["baseline_complete"] else None})
+@@ -102 +131,5 @@ def footer(a):
+- routes=", ".join(f'{r["subagent_route"]} {r["total_tokens"]:,}t/{r["credits"] if r["credits"] is not None else "?"}cr' for r in s["by_subagent_model_effort"])
++ def route_text(r):
++  tokens="?" if r["total_tokens"] is None else f'{r["total_tokens"]:,}'
++  credits="?" if r["credits"] is None else r["credits"]
++  return f'{r["subagent_route"]} {tokens}t/{credits}cr'
++ routes=", ".join(route_text(r) for r in s["by_subagent_model_effort"])
+@@ -106 +139 @@ def parser():
+- p=argparse.ArgumentParser(description=__doc__);s=p.add_subparsers(dest="cmd",required=True);r=s.add_parser("record-turn");r.add_argument("--turn-id",required=True);r.add_argument("--run-id");r.add_argument("--project");r.add_argument("--front-door-model");r.add_argument("--front-door-effort");r.add_argument("--usage",action="append",type=parse_usage);r.add_argument("--message",action="append",type=parse_message);r.add_argument("--measured-credits",type=float);r.add_argument("--baseline-model",default="gpt-5.6-sol");r.add_argument("--baseline-token-multiplier",type=float,default=1.0);r.add_argument("--timestamp");r.add_argument("--notes");r.set_defaults(func=record)
++ p=argparse.ArgumentParser(description=__doc__);s=p.add_subparsers(dest="cmd",required=True);r=s.add_parser("record-turn");r.add_argument("--turn-id",required=True);r.add_argument("--run-id");r.add_argument("--project");r.add_argument("--front-door-model");r.add_argument("--front-door-effort");r.add_argument("--usage",action="append",type=parse_usage);r.add_argument("--task-usage",action="append",type=parse_task_usage);r.add_argument("--unknown-usage",action="append",type=parse_unknown_usage);r.add_argument("--unknown-task-usage",action="append",type=parse_unknown_task_usage);r.add_argument("--message",action="append",type=parse_message);r.add_argument("--measured-credits",type=float);r.add_argument("--baseline-model",default="gpt-5.6-sol");r.add_argument("--baseline-token-multiplier",type=float,default=1.0);r.add_argument("--timestamp");r.add_argument("--notes");r.set_defaults(func=record)
+diff --git a/scripts/validate_skill.py b/scripts/validate_skill.py
+index f38d0d3..1e1da49 100644
+--- a/scripts/validate_skill.py
++++ b/scripts/validate_skill.py
+@@ -19 +19 @@ if "name: agent-dispatch" not in front:
+-for required_path in ("scripts/dispatch.py", "scripts/bootstrap_agents.py", "references/routing.md", "references/learning.md", "references/contracts.md", "references/parallel-safety.md", "agents/openai.yaml"):
++for required_path in ("scripts/dispatch.py", "scripts/usage.py", "scripts/bootstrap_agents.py", "references/routing.md", "references/learning.md", "references/contracts.md", "references/parallel-safety.md", "agents/openai.yaml"):
+diff --git a/tests/test_dispatch.py b/tests/test_dispatch.py
+index 0440d40..ce0649f 100644
+--- a/tests/test_dispatch.py
++++ b/tests/test_dispatch.py
+@@ -5,0 +6 @@ BOOTSTRAP=HERE/"scripts"/"bootstrap_agents.py"
++USAGE=HERE/"scripts"/"usage.py"
+@@ -10,0 +12,3 @@ class DispatchTests(unittest.TestCase):
++    def run_usage(self,*args,env=None):
++        return subprocess.run(["python3",str(USAGE),*args],check=True,text=True,capture_output=True,env=env)
++
+@@ -69,0 +74,85 @@ class DispatchTests(unittest.TestCase):
++    def test_bootstrap_bumps_global_instruction_version_once(self):
++        with tempfile.TemporaryDirectory() as td:
++            env=os.environ.copy();env["CODEX_HOME"]=td
++            path=Path(td)/"AGENTS.md"
++            path.write_text("# Global AGENTS.md V10\n\n<!-- agent-dispatch:start -->\nold\n<!-- agent-dispatch:end -->\n")
++            subprocess.run(["python3",str(BOOTSTRAP)],check=True,env=env,capture_output=True,text=True)
++            first=path.read_text();self.assertIn("# Global AGENTS.md V11",first);self.assertIn("pre-spawn receipt",first)
++            subprocess.run(["python3",str(BOOTSTRAP)],check=True,env=env,capture_output=True,text=True)
++            second=path.read_text();self.assertEqual(first,second);self.assertNotIn("V12",second)
++
++    def test_managed_lifecycle_unknown_usage_and_summary(self):
++        with tempfile.TemporaryDirectory() as td:
++            env=os.environ.copy();env["AGENT_DISPATCH_HOME"]=td
++            self.run_cmd("begin-run","--run-id","r1","--project","demo","--front-door-model","sol",env=env)
++            self.run_cmd("begin-task","--run-id","r1","--task-id","t1","--task-class","code_review","--tier","general","--worker-model","terra",env=env)
++            self.run_cmd("bind-task","--run-id","r1","--task-id","t1","--agent-id","a1",env=env)
++            terminal=json.loads(self.run_cmd("finish-task","--run-id","r1","--task-id","t1","--actual-worker-model","terra-v2","--actual-worker-reasoning","high","--outcome","pass","--accepted","true",env=env).stdout)
++            self.assertEqual(terminal["requested_worker_model"],"terra");self.assertEqual(terminal["worker_model"],"terra-v2");self.assertEqual(terminal["worker_reasoning"],"high")
++            self.run_usage("record-turn","--turn-id","turn1","--run-id","r1","--unknown-usage","root,front_door,sol,max,counters_unavailable","--unknown-task-usage","t1,a1,worker,terra,high,counters_unavailable",env=env)
++            audit=json.loads(self.run_cmd("audit-run","--run-id","r1","--expected-agent-id","a1","--expected-task-count","1",env=env).stdout)
++            self.assertTrue(audit["ok"]);self.assertEqual(audit["unknown_usage_tasks"],1)
++            missing_runtime=subprocess.run(["python3",str(DISPATCH),"record-run","--run-id","r1","--delegated-tasks","1"],text=True,capture_output=True,env=env)
++            self.assertNotEqual(missing_runtime.returncode,0);self.assertIn("require --expected-agent-id",missing_runtime.stderr)
++            summary=json.loads(self.run_cmd("record-run","--run-id","r1","--project","demo","--delegated-tasks","1","--expected-agent-id","a1","--accepted","true","--outcome","pass",env=env).stdout)
++            self.assertEqual(summary["telemetry_audit"],"pass")
++
++    def test_audit_and_summary_fail_closed_on_missing_terminal_or_usage(self):
++        with tempfile.TemporaryDirectory() as td:
++            env=os.environ.copy();env["AGENT_DISPATCH_HOME"]=td
++            self.run_cmd("begin-run","--run-id","r1",env=env)
++            self.run_cmd("begin-task","--run-id","r1","--task-id","t1","--task-class","code_review","--tier","general",env=env)
++            self.run_cmd("bind-task","--run-id","r1","--task-id","t1","--agent-id","a1",env=env)
++            audit=subprocess.run(["python3",str(DISPATCH),"audit-run","--run-id","r1"],text=True,capture_output=True,env=env)
++            self.assertNotEqual(audit.returncode,0);self.assertIn("terminal events",audit.stdout);self.assertIn("missing turn_usage",audit.stdout)
++            summary=subprocess.run(["python3",str(DISPATCH),"record-run","--run-id","r1","--delegated-tasks","1"],text=True,capture_output=True,env=env)
++            self.assertNotEqual(summary.returncode,0);self.assertIn("telemetry audit failed",summary.stderr)
++
++    def test_failed_spawn_closes_without_worker_usage(self):
++        with tempfile.TemporaryDirectory() as td:
++            env=os.environ.copy();env["AGENT_DISPATCH_HOME"]=td
++            self.run_cmd("begin-run","--run-id","r1",env=env)
++            self.run_cmd("begin-task","--run-id","r1","--task-id","t1","--task-class","code_review","--tier","general",env=env)
++            self.run_cmd("finish-task","--run-id","r1","--task-id","t1","--spawned","false","--outcome","fail",env=env)
++            self.run_usage("record-turn","--turn-id","turn1","--run-id","r1","--unknown-usage","root,front_door,sol,max",env=env)
++            audit=json.loads(self.run_cmd("audit-run","--run-id","r1","--expected-task-count","1",env=env).stdout)
++            self.assertTrue(audit["ok"]);self.assertEqual(audit["observed_agent_ids"],[])
++
++    def test_reactivation_reuses_agent_but_requires_distinct_task_receipts(self):
++        with tempfile.TemporaryDirectory() as td:
++            env=os.environ.copy();env["AGENT_DISPATCH_HOME"]=td
++            self.run_cmd("begin-run","--run-id","r1",env=env)
++            for task in ("t1","t2"):
++                self.run_cmd("begin-task","--run-id","r1","--task-id",task,"--task-class","code_review","--tier","general","--agent-id","a1",env=env)
++                self.run_cmd("finish-task","--run-id","r1","--task-id",task,"--outcome","pass",env=env)
++            self.run_usage("record-turn","--turn-id","turn1","--run-id","r1","--unknown-usage","root,front_door,sol,max","--unknown-task-usage","t1,a1,worker,terra,high","--unknown-task-usage","t2,a1,worker,terra,high",env=env)
++            audit=json.loads(self.run_cmd("audit-run","--run-id","r1","--expected-agent-id","a1","--expected-task-count","2",env=env).stdout)
++            self.assertTrue(audit["ok"]);self.assertEqual(audit["task_receipts"],2);self.assertEqual(audit["observed_agent_ids"],["a1"])
++
++    def test_expected_runtime_agent_and_task_count_are_reconciled(self):
++        with tempfile.TemporaryDirectory() as td:
++            env=os.environ.copy();env["AGENT_DISPATCH_HOME"]=td
++            self.run_cmd("begin-run","--run-id","r1",env=env)
++            self.run_usage("record-turn","--turn-id","turn1","--run-id","r1","--unknown-usage","root,front_door,sol,max",env=env)
++            audit=subprocess.run(["python3",str(DISPATCH),"audit-run","--run-id","r1","--expected-agent-id","missing","--expected-task-count","1"],text=True,capture_output=True,env=env)
++            self.assertNotEqual(audit.returncode,0);self.assertIn("expected 1 task receipts; found 0",audit.stdout);self.assertIn("expected runtime agent is missing",audit.stdout)
++
++    def test_rough_message_estimate_does_not_satisfy_front_door_usage(self):
++        with tempfile.TemporaryDirectory() as td:
++            env=os.environ.copy();env["AGENT_DISPATCH_HOME"]=td
++            self.run_cmd("begin-run","--run-id","r1",env=env)
++            self.run_usage("record-turn","--turn-id","turn1","--run-id","r1","--message","root,front_door,sol,max",env=env)
++            audit=subprocess.run(["python3",str(DISPATCH),"audit-run","--run-id","r1","--expected-task-count","0"],text=True,capture_output=True,env=env)
++            self.assertNotEqual(audit.returncode,0);self.assertIn("missing measured, estimated, or unknown front-door usage",audit.stdout)
++
++    def test_lifecycle_task_cannot_be_recorded_or_finished_twice(self):
++        with tempfile.TemporaryDirectory() as td:
++            env=os.environ.copy();env["AGENT_DISPATCH_HOME"]=td
++            self.run_cmd("begin-run","--run-id","r1",env=env)
++            self.run_cmd("begin-task","--run-id","r1","--task-id","t1","--task-class","code_review","--tier","general","--agent-id","a1",env=env)
++            direct=subprocess.run(["python3",str(DISPATCH),"record","--run-id","r1","--task-id","t1","--task-class","code_review","--tier","general"],text=True,capture_output=True,env=env)
++            self.assertNotEqual(direct.returncode,0);self.assertIn("finish-task",direct.stderr)
++            self.run_cmd("finish-task","--run-id","r1","--task-id","t1","--outcome","pass",env=env)
++            duplicate=subprocess.run(["python3",str(DISPATCH),"finish-task","--run-id","r1","--task-id","t1","--outcome","pass"],text=True,capture_output=True,env=env)
++            self.assertNotEqual(duplicate.returncode,0);self.assertIn("already finished",duplicate.stderr)
++
+diff --git a/tests/test_usage.py b/tests/test_usage.py
+index f824768..e64f3bd 100644
+--- a/tests/test_usage.py
++++ b/tests/test_usage.py
+@@ -19,0 +20,17 @@ class UsageTests(unittest.TestCase):
++ def test_task_aware_usage_preserves_task_id(self):
++  with tempfile.TemporaryDirectory() as td:
++   e=os.environ.copy();e["AGENT_DISPATCH_HOME"]=td
++   x=json.loads(self.cli("record-turn","--turn-id","t1","--run-id","r1","--usage","root,front_door,gpt-5.6-sol,max,10,5,2,measured","--task-usage","task1,w1,worker,gpt-5.6-terra,high,100,20,10,estimated",env=e).stdout)
++   task=next(c for c in x["components"] if c.get("task_id")=="task1")
++   self.assertEqual(task["agent_id"],"w1");self.assertEqual(task["token_source"],"estimated");self.assertEqual(x["token_source"],"mixed")
++ def test_unknown_usage_stays_null_and_visible(self):
++  with tempfile.TemporaryDirectory() as td:
++   e=os.environ.copy();e["AGENT_DISPATCH_HOME"]=td
++   x=json.loads(self.cli("record-turn","--turn-id","t1","--run-id","r1","--unknown-usage","root,front_door,gpt-5.6-sol,max,counters_unavailable","--unknown-task-usage","task1,w1,worker,gpt-5.6-terra,high,counters_unavailable",env=e).stdout)
++   self.assertNotIn("token_total",x);self.assertEqual(x["token_source"],"unknown");self.assertIsNone(x.get("credit_total"))
++   task=next(c for c in x["components"] if c.get("task_id")=="task1")
++   self.assertIsNone(task["input_tokens"]);self.assertEqual(task["token_source"],"unknown")
++   report=json.loads(self.cli("report","--project","",env=e).stdout)
++   worker=next(r for r in report["by_subagent_model_effort"] if r["subagent_route"].startswith("w1:"))
++   self.assertIsNone(worker["total_tokens"]);self.assertFalse(worker["token_counts_complete"])
++   footer=self.cli("footer","--turn-id","t1",env=e).stdout;self.assertIn("w1:worker",footer);self.assertIn("?t/?cr",footer)

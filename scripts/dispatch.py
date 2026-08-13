@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Adaptive local orchestration telemetry, policy learning, and reporting for Agent Dispatch."""
 from __future__ import annotations
-import argparse, datetime as dt, json, os, statistics, sys
+import argparse, datetime as dt, json, os, statistics, sys, uuid
 from collections import defaultdict
 from pathlib import Path
 
-SCHEMA=2
+SCHEMA=3
 TIERS=("frontier","general","cheap","alternate_pool")
 DEFAULT_CONFIG={
  "schema":SCHEMA,"min_samples":8,"exploration_rate":0.05,"half_life_days":45.0,
@@ -48,7 +48,8 @@ def boolish(v):
     raise argparse.ArgumentTypeError(v)
 def append_event(e):
     init_state_silent(); t,_,_=paths(); e={k:v for k,v in e.items() if v is not None}
-    with t.open("a") as f:f.write(json.dumps(e,sort_keys=True)+"\n")
+    with t.open("a") as f:
+        f.write(json.dumps(e,sort_keys=True)+"\n");f.flush();os.fsync(f.fileno())
     return e
 def all_events(kind=None):
     init_state_silent(); t,_,_=paths(); out=[]
@@ -89,9 +90,138 @@ def maybe_tune():
     init_state_silent(); _,_,cp=paths(); cfg=load_json(cp,DEFAULT_CONFIG); n=len(all_events("delegated_task"))
     if n and n % int(cfg.get("tune_every",8))==0:tune_internal()
 
+def run_events(run_id):return [e for e in all_events() if e.get("run_id")==run_id]
+def require_one(events,label):
+    if len(events)!=1:raise SystemExit(f"Expected exactly one {label}; found {len(events)}")
+    return events[0]
+def lifecycle_start(run_id,task_id):
+    return require_one([e for e in run_events(run_id) if e.get("event")=="delegated_task_started" and e.get("task_id")==task_id],f"start receipt for task {task_id}")
+
+def begin_run(a):
+    rid=a.run_id or str(uuid.uuid4())
+    if any(e.get("run_id")==rid for e in all_events()):raise SystemExit(f"Run ID already exists: {rid}")
+    e={"schema":SCHEMA,"timestamp":a.timestamp or now_iso(),"event":"run_started","run_id":rid,"project":a.project,
+       "front_door_model":a.front_door_model,"front_door_revision":a.front_door_revision,
+       "front_door_reasoning":a.front_door_reasoning,"skill_version":a.skill_version,"notes":a.notes}
+    print(json.dumps(append_event(e),indent=2,sort_keys=True))
+
+def begin_task(a):
+    evs=run_events(a.run_id);run=require_one([e for e in evs if e.get("event")=="run_started"],f"run start for {a.run_id}")
+    if any(e.get("event")=="run_summary" for e in evs):raise SystemExit(f"Run is already summarized: {a.run_id}")
+    tid=a.task_id or str(uuid.uuid4())
+    if any(e.get("task_id")==tid for e in evs):raise SystemExit(f"Task ID already exists in run {a.run_id}: {tid}")
+    e={"schema":SCHEMA,"timestamp":a.timestamp or now_iso(),"event":"delegated_task_started","lifecycle_managed":True,
+       "receipt_status":"pre_spawn","task_id":tid,"run_id":a.run_id,"parent_task_id":a.parent_task_id,
+       "agent_id":a.agent_id,"project":a.project or run.get("project"),"task_class":a.task_class,"domain":a.domain,
+       "front_door_model":run.get("front_door_model"),"front_door_revision":run.get("front_door_revision"),
+       "front_door_reasoning":run.get("front_door_reasoning"),"requested_worker_model":a.worker_model,
+       "requested_worker_revision":a.worker_revision,"requested_worker_reasoning":a.worker_reasoning,"tier":a.tier,
+       "delegation_depth":a.delegation_depth,"parallel":a.parallel,"parallel_group_size":a.parallel_group_size,
+       "write_class":a.write_class,"shadow":a.shadow,"consultation_mode":a.consultation_mode,
+       "skill_version":a.skill_version or run.get("skill_version"),"notes":a.notes}
+    print(json.dumps(append_event(e),indent=2,sort_keys=True))
+
+def bind_task(a):
+    start=lifecycle_start(a.run_id,a.task_id);evs=run_events(a.run_id)
+    if any(e.get("event")=="delegated_task" and e.get("task_id")==a.task_id for e in evs):raise SystemExit(f"Task is already finished: {a.task_id}")
+    if start.get("agent_id"):raise SystemExit(f"Task already has agent ID {start['agent_id']}: {a.task_id}")
+    if any(e.get("event")=="delegated_task_bound" and e.get("task_id")==a.task_id for e in evs):raise SystemExit(f"Task is already bound: {a.task_id}")
+    e={"schema":SCHEMA,"timestamp":a.timestamp or now_iso(),"event":"delegated_task_bound","lifecycle_managed":True,
+       "run_id":a.run_id,"task_id":a.task_id,"agent_id":a.agent_id}
+    print(json.dumps(append_event(e),indent=2,sort_keys=True))
+
+def finish_task(a):
+    start=lifecycle_start(a.run_id,a.task_id);evs=run_events(a.run_id)
+    if any(e.get("event")=="delegated_task" and e.get("task_id")==a.task_id for e in evs):raise SystemExit(f"Task is already finished: {a.task_id}")
+    binds=[e for e in evs if e.get("event")=="delegated_task_bound" and e.get("task_id")==a.task_id]
+    if len(binds)>1:raise SystemExit(f"Task has duplicate agent bindings: {a.task_id}")
+    ids={x for x in (start.get("agent_id"),binds[0].get("agent_id") if binds else None,a.agent_id) if x}
+    if len(ids)>1:raise SystemExit(f"Task has conflicting agent IDs: {a.task_id}")
+    agent_id=next(iter(ids),None);spawned=True if a.spawned is None else a.spawned
+    if spawned and not agent_id:raise SystemExit("A spawned task must be bound to an agent ID before it can finish")
+    if not spawned and agent_id:raise SystemExit("A not-spawned task cannot have an agent ID")
+    if not spawned and a.outcome not in {"blocked","fail"}:raise SystemExit("A not-spawned task must finish blocked or fail")
+    e={"schema":SCHEMA,"timestamp":a.timestamp or now_iso(),"event":"delegated_task","lifecycle_managed":True,
+       "task_id":a.task_id,"run_id":a.run_id,"parent_task_id":start.get("parent_task_id"),"agent_id":agent_id,
+       "spawned":spawned,"project":start.get("project"),"task_class":start.get("task_class"),"domain":start.get("domain"),
+       "front_door_model":start.get("front_door_model"),"front_door_revision":start.get("front_door_revision"),
+       "front_door_reasoning":start.get("front_door_reasoning"),"requested_worker_model":start.get("requested_worker_model"),
+       "requested_worker_revision":start.get("requested_worker_revision"),"requested_worker_reasoning":start.get("requested_worker_reasoning"),
+       "worker_model":a.actual_worker_model or start.get("requested_worker_model"),
+       "worker_revision":a.actual_worker_revision or start.get("requested_worker_revision"),
+       "worker_reasoning":a.actual_worker_reasoning or start.get("requested_worker_reasoning"),"tier":start.get("tier"),
+       "delegation_depth":start.get("delegation_depth",0),"parallel":start.get("parallel"),
+       "parallel_group_size":start.get("parallel_group_size"),"parallel_collision":a.parallel_collision,
+       "write_class":start.get("write_class"),"shadow":start.get("shadow"),"consultation_mode":start.get("consultation_mode"),
+       "frontier_use":a.frontier_use,"frontier_calls":a.frontier_calls,"duration_s":a.duration_s,
+       "input_tokens":a.input_tokens,"output_tokens":a.output_tokens,"usage_source":a.usage_source,
+       "retries":a.retries,"escalations":a.escalations,"review_pass":a.review_pass,"tests_pass":a.tests_pass,
+       "rework":a.rework,"accepted":a.accepted,"outcome":a.outcome,"notes":a.notes,
+       "skill_version":start.get("skill_version")}
+    print(json.dumps(append_event(e),indent=2,sort_keys=True));maybe_tune()
+
+def audit_run_data(run_id,expected_agent_ids=None,expected_task_count=None):
+    evs=run_events(run_id);errors=[];warnings=[]
+    run_starts=[e for e in evs if e.get("event")=="run_started"]
+    if len(run_starts)!=1:errors.append(f"expected one run_started event; found {len(run_starts)}")
+    starts=[e for e in evs if e.get("event")=="delegated_task_started"]
+    if expected_task_count is not None and len(starts)!=expected_task_count:errors.append(f"expected {expected_task_count} task receipts; found {len(starts)}")
+    task_ids=[e.get("task_id") for e in starts]
+    for tid in sorted({x for x in task_ids if x}):
+        if task_ids.count(tid)!=1:errors.append(f"duplicate task receipts: {tid}")
+    turns=[e for e in evs if e.get("event")=="turn_usage"]
+    components=[c for turn in turns for c in turn.get("components",[])]
+    if not turns:errors.append("missing turn_usage event")
+    front_usage=[c for c in components if c.get("role")=="front_door" and c.get("token_source") in {"measured","estimated","unknown"}]
+    if turns and not front_usage:errors.append("missing measured, estimated, or unknown front-door usage component")
+    for c in front_usage:
+        source=c.get("token_source");vals=[c.get(k) for k in ("input_tokens","cached_input_tokens","output_tokens")]
+        if source=="unknown" and any(v is not None for v in vals):errors.append("unknown front-door usage must not contain token counts")
+        if source in {"measured","estimated"} and any(not isinstance(v,int) or v<0 for v in vals):errors.append("known front-door usage requires non-negative integer token counts")
+    observed_agents=set();unknown_usage=0;completed=0
+    for start in starts:
+        tid=start.get("task_id");terms=[e for e in evs if e.get("event")=="delegated_task" and e.get("task_id")==tid]
+        if len(terms)!=1:
+            errors.append(f"task {tid} has {len(terms)} terminal events; expected 1");continue
+        completed+=1;term=terms[0];binds=[e for e in evs if e.get("event")=="delegated_task_bound" and e.get("task_id")==tid]
+        if len(binds)>1:errors.append(f"task {tid} has duplicate agent bindings")
+        ids={x for x in (start.get("agent_id"),*(e.get("agent_id") for e in binds),term.get("agent_id")) if x}
+        if len(ids)>1:errors.append(f"task {tid} has conflicting agent IDs")
+        agent_id=next(iter(ids),None);spawned=term.get("spawned",True)
+        if spawned and not agent_id:errors.append(f"task {tid} is spawned but unbound")
+        if agent_id:observed_agents.add(agent_id)
+        task_usage=[c for c in components if c.get("task_id")==tid]
+        if spawned and len(task_usage)!=1:errors.append(f"task {tid} has {len(task_usage)} task-aware usage components; expected 1")
+        if not spawned and task_usage:errors.append(f"task {tid} was not spawned but has usage")
+        if task_usage:
+            c=task_usage[0];source=c.get("token_source")
+            if c.get("agent_id")!=agent_id:errors.append(f"task {tid} usage agent ID does not match its binding")
+            if source not in {"measured","estimated","unknown"}:errors.append(f"task {tid} has invalid token source {source!r}")
+            if source=="unknown":
+                unknown_usage+=1
+                if any(c.get(k) is not None for k in ("input_tokens","cached_input_tokens","output_tokens")):errors.append(f"task {tid} unknown usage must not contain token counts")
+            elif source in {"measured","estimated"}:
+                vals=[c.get(k) for k in ("input_tokens","cached_input_tokens","output_tokens")]
+                if any(not isinstance(v,int) or v<0 for v in vals):errors.append(f"task {tid} known usage requires non-negative integer token counts")
+    expected=set(expected_agent_ids or [])
+    if expected:
+        for aid in sorted(expected-observed_agents):errors.append(f"expected runtime agent is missing from receipts: {aid}")
+        for aid in sorted(observed_agents-expected):errors.append(f"receipt agent is missing from runtime expectations: {aid}")
+    summaries=[e for e in evs if e.get("event")=="run_summary"]
+    if len(summaries)>1:errors.append(f"duplicate run summaries: {len(summaries)}")
+    return {"ok":not errors,"run_id":run_id,"task_receipts":len(starts),"completed_tasks":completed,
+            "observed_agent_ids":sorted(observed_agents),"unknown_usage_tasks":unknown_usage,"errors":errors,"warnings":warnings}
+
+def audit_run(a):
+    result=audit_run_data(a.run_id,a.expected_agent_id,a.expected_task_count)
+    print(json.dumps(result,indent=2,sort_keys=True))
+    if not result["ok"]:raise SystemExit(1)
+
 def record_task(a):
+    if a.run_id and any(e.get("event")=="delegated_task_started" and e.get("task_id")==a.task_id for e in run_events(a.run_id)):
+        raise SystemExit("Lifecycle-managed tasks must be finalized with finish-task")
     e={"schema":SCHEMA,"timestamp":a.timestamp or now_iso(),"event":"delegated_task","task_id":a.task_id,
-       "run_id":a.run_id,"parent_task_id":a.parent_task_id,"project":a.project,"task_class":a.task_class,"domain":a.domain,
+       "run_id":a.run_id,"parent_task_id":a.parent_task_id,"agent_id":a.agent_id,"project":a.project,"task_class":a.task_class,"domain":a.domain,
        "front_door_model":a.front_door_model,"front_door_revision":a.front_door_revision,"front_door_reasoning":a.front_door_reasoning,
        "worker_model":a.worker_model,"worker_revision":a.worker_revision,"worker_reasoning":a.worker_reasoning,"tier":a.tier,
        "delegation_depth":a.delegation_depth,"parallel":a.parallel,"parallel_group_size":a.parallel_group_size,
@@ -102,12 +232,25 @@ def record_task(a):
        "rework":a.rework,"accepted":a.accepted,"outcome":a.outcome,"notes":a.notes,"skill_version":a.skill_version}
     print(json.dumps(append_event(e),indent=2,sort_keys=True)); maybe_tune()
 def record_run(a):
+    evs=run_events(a.run_id)
+    if any(e.get("event")=="run_summary" for e in evs):raise SystemExit(f"Run is already summarized: {a.run_id}")
+    managed=any(e.get("event")=="run_started" for e in evs);audit=None
+    if managed:
+        expected_count=a.expected_task_count if a.expected_task_count is not None else a.delegated_tasks
+        if expected_count is None:raise SystemExit("Managed run summaries require --delegated-tasks or --expected-task-count")
+        spawned_ids={e.get("agent_id") for e in evs if e.get("event")=="delegated_task" and e.get("spawned",True) and e.get("agent_id")}
+        if spawned_ids and not a.expected_agent_id:raise SystemExit("Managed run summaries with spawned tasks require --expected-agent-id for runtime reconciliation")
+        audit=audit_run_data(a.run_id,a.expected_agent_id,expected_count)
+        if not audit["ok"]:
+            print(json.dumps(audit,indent=2,sort_keys=True),file=sys.stderr)
+            raise SystemExit("Refusing to summarize run because telemetry audit failed")
     e={"schema":SCHEMA,"timestamp":a.timestamp or now_iso(),"event":"run_summary","run_id":a.run_id,"project":a.project,
        "front_door_model":a.front_door_model,"front_door_revision":a.front_door_revision,"front_door_reasoning":a.front_door_reasoning,
        "duration_s":a.duration_s,"input_tokens":a.input_tokens,"output_tokens":a.output_tokens,"usage_source":a.usage_source,
        "frontier_calls":a.frontier_calls,"frontier_tokens":a.frontier_tokens,"delegated_tasks":a.delegated_tasks,
        "max_parallelism":a.max_parallelism,"rework":a.rework,"accepted":a.accepted,"tests_pass":a.tests_pass,
-       "review_pass":a.review_pass,"outcome":a.outcome,"skill_version":a.skill_version,"notes":a.notes}
+       "review_pass":a.review_pass,"outcome":a.outcome,"skill_version":a.skill_version,"notes":a.notes,
+       "telemetry_audit":"pass" if managed else None}
     print(json.dumps(append_event(e),indent=2,sort_keys=True))
 def aggregate_rows(rows,cfg):
     tw=sum(w for _,w in rows) or 1
@@ -231,8 +374,24 @@ def reset(a):
     print(f"Reset Agent Dispatch state at {state_dir()}")
 def parser():
     p=argparse.ArgumentParser(description=__doc__);s=p.add_subparsers(dest="cmd",required=True);s.add_parser("init").set_defaults(func=lambda a:init_state())
+    br=s.add_parser("begin-run")
+    for x in ("run-id","project","front-door-model","front-door-revision","front-door-reasoning","skill-version","notes","timestamp"):br.add_argument("--"+x)
+    br.set_defaults(func=begin_run)
+    bt=s.add_parser("begin-task")
+    for x,req in (("run-id",True),("task-id",False),("parent-task-id",False),("agent-id",False),("project",False),("task-class",True),("domain",False),("worker-model",False),("worker-revision",False),("worker-reasoning",False),("skill-version",False),("notes",False),("timestamp",False)):bt.add_argument("--"+x,required=req)
+    bt.add_argument("--tier",choices=TIERS,required=True);bt.add_argument("--delegation-depth",type=int,default=0)
+    for x in ("parallel","shadow"):bt.add_argument("--"+x,type=boolish)
+    bt.add_argument("--parallel-group-size",type=int);bt.add_argument("--write-class",choices=["read_only","write_isolated","write_shared"]);bt.add_argument("--consultation-mode",choices=["plan","consult","subtree","adjudicate"]);bt.set_defaults(func=begin_task)
+    bind=s.add_parser("bind-task");bind.add_argument("--run-id",required=True);bind.add_argument("--task-id",required=True);bind.add_argument("--agent-id",required=True);bind.add_argument("--timestamp");bind.set_defaults(func=bind_task)
+    ft=s.add_parser("finish-task")
+    for x in ("run-id","task-id"):ft.add_argument("--"+x,required=True)
+    for x in ("agent-id","actual-worker-model","actual-worker-revision","actual-worker-reasoning","notes","timestamp"):ft.add_argument("--"+x)
+    for x in ("spawned","parallel-collision","review-pass","tests-pass","rework","accepted"):ft.add_argument("--"+x,type=boolish)
+    ft.add_argument("--frontier-use",choices=["necessary","rescue","avoidable","unknown"]);ft.add_argument("--frontier-calls",type=int,default=0);ft.add_argument("--duration-s",type=float);ft.add_argument("--input-tokens",type=int);ft.add_argument("--output-tokens",type=int)
+    ft.add_argument("--usage-source",choices=["measured","derived","unknown"],default="unknown");ft.add_argument("--retries",type=int,default=0);ft.add_argument("--escalations",type=int,default=0);ft.add_argument("--outcome",choices=["pass","partial","blocked","fail"],required=True);ft.set_defaults(func=finish_task)
+    ar=s.add_parser("audit-run");ar.add_argument("--run-id",required=True);ar.add_argument("--expected-agent-id",action="append");ar.add_argument("--expected-task-count",type=int);ar.set_defaults(func=audit_run)
     r=s.add_parser("record")
-    for x,req in (("task-id",True),("run-id",False),("parent-task-id",False),("project",False),("task-class",True),("domain",False),("front-door-model",False),("front-door-revision",False),("front-door-reasoning",False),("worker-model",False),("worker-revision",False),("worker-reasoning",False),("skill-version",False),("notes",False),("timestamp",False)):r.add_argument("--"+x,required=req)
+    for x,req in (("task-id",True),("run-id",False),("parent-task-id",False),("agent-id",False),("project",False),("task-class",True),("domain",False),("front-door-model",False),("front-door-revision",False),("front-door-reasoning",False),("worker-model",False),("worker-revision",False),("worker-reasoning",False),("skill-version",False),("notes",False),("timestamp",False)):r.add_argument("--"+x,required=req)
     r.add_argument("--tier",choices=TIERS,required=True);r.add_argument("--delegation-depth",type=int,default=0)
     for x in ("parallel","parallel-collision","shadow","review-pass","tests-pass","rework","accepted"):r.add_argument("--"+x,type=boolish)
     r.add_argument("--parallel-group-size",type=int);r.add_argument("--write-class",choices=["read_only","write_isolated","write_shared"]);r.add_argument("--consultation-mode",choices=["plan","consult","subtree","adjudicate"])
@@ -240,6 +399,7 @@ def parser():
     r.add_argument("--usage-source",choices=["measured","derived","unknown"],default="unknown");r.add_argument("--retries",type=int,default=0);r.add_argument("--escalations",type=int,default=0);r.add_argument("--outcome",choices=["pass","partial","blocked","fail"]);r.set_defaults(func=record_task)
     rr=s.add_parser("record-run")
     for x,req in (("run-id",True),("project",False),("front-door-model",False),("front-door-revision",False),("front-door-reasoning",False),("skill-version",False),("notes",False),("timestamp",False)):rr.add_argument("--"+x,required=req)
+    rr.add_argument("--expected-agent-id",action="append");rr.add_argument("--expected-task-count",type=int)
     for x in ("rework","accepted","tests-pass","review-pass"):rr.add_argument("--"+x,type=boolish)
     for x in ("frontier-calls","frontier-tokens","delegated-tasks","max-parallelism","input-tokens","output-tokens"):rr.add_argument("--"+x,type=int)
     rr.add_argument("--duration-s",type=float);rr.add_argument("--usage-source",choices=["measured","derived","unknown"],default="unknown");rr.add_argument("--outcome",choices=["pass","partial","blocked","fail"]);rr.set_defaults(func=record_run)

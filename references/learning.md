@@ -6,7 +6,9 @@ Telemetry is local-first, append-only at the raw-event layer, outcome-oriented, 
 
 Global state lives under `~/.codex/agent-dispatch/`: `telemetry.jsonl` (raw events), `routing-state.json` (derived policy), `config.json` (bounded learner parameters), and `cells.json` (runtime-supported model×effort cells).
 
-`delegated_task` records child/subtree outcomes; `run_summary` records whole front-door runs so highly delegated jobs do not count as many independent front-door experiments.
+`run_started` identifies a managed user-facing run. `delegated_task_started` is the immutable pre-spawn receipt, `delegated_task_bound` attaches the host-returned agent ID, and `delegated_task` records the terminal child/subtree outcome. Only terminal `delegated_task` events feed the learner. `turn_usage` links task-aware usage by `run_id` and `task_id`; `run_summary` records whole front-door runs so highly delegated jobs do not count as many independent front-door experiments.
+
+Every substantive spawn or reactivation gets a distinct task receipt before the host call. Terminal outcomes and usage append new events rather than mutating that receipt. A lifecycle audit requires exactly one terminal outcome and one task-aware measured, estimated, or explicitly unknown usage component for each spawned receipt. A receipt closed as not spawned requires no worker usage. Runtime agent IDs and the expected task count should be supplied to the audit whenever the host exposes them, because the ledger alone cannot detect a spawn that bypassed registration entirely.
 
 Every delegated observation contributes to project-specific and pooled global aggregates. Project-local evidence overrides broader priors once strong enough. Model identity, optional model/runtime revision, reasoning effort, and skill version distinguish learned routes. Recent evidence is weighted more heavily than stale evidence.
 
