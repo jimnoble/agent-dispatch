@@ -25,7 +25,11 @@ def bump_global_version(text: str) -> str:
     match = re.search(r"(?m)^(# Global AGENTS\.md V)(\d+)[ \t]*$", text)
     if not match:
         return text
-    return text[:match.start()] + f"{match.group(1)}{int(match.group(2)) + 1}" + text[match.end():]
+    old_version = int(match.group(2))
+    new_version = old_version + 1
+    text = text[:match.start()] + f"{match.group(1)}{new_version}" + text[match.end():]
+    commentary = re.compile(r"(Begin every request's commentary with exactly `COMPLYING WITH GLOBAL AGENTS\.MD\nV)" + str(old_version) + r"(`)")
+    return commentary.sub(rf"\g<1>{new_version}\g<2>", text)
 
 
 def main() -> int:

@@ -75,9 +75,9 @@ class DispatchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             env=os.environ.copy();env["CODEX_HOME"]=td
             path=Path(td)/"AGENTS.md"
-            path.write_text("# Global AGENTS.md V10\n\n<!-- agent-dispatch:start -->\nold\n<!-- agent-dispatch:end -->\n")
+            path.write_text("# Global AGENTS.md V10\n\nBegin every request's commentary with exactly `COMPLYING WITH GLOBAL AGENTS.MD\nV10`.\n\n<!-- agent-dispatch:start -->\nold\n<!-- agent-dispatch:end -->\n")
             subprocess.run(["python3",str(BOOTSTRAP)],check=True,env=env,capture_output=True,text=True)
-            first=path.read_text();self.assertIn("# Global AGENTS.md V11",first);self.assertIn("pre-spawn receipt",first)
+            first=path.read_text();self.assertIn("# Global AGENTS.md V11",first);self.assertIn("GLOBAL AGENTS.MD\nV11`",first);self.assertIn("pre-spawn receipt",first)
             subprocess.run(["python3",str(BOOTSTRAP)],check=True,env=env,capture_output=True,text=True)
             second=path.read_text();self.assertEqual(first,second);self.assertNotIn("V12",second)
 

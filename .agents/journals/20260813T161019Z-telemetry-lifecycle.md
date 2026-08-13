@@ -71,9 +71,34 @@ UTC task journal for the Agent Dispatch telemetry lifecycle implementation and p
 
 > Repository-journaling sidecar created: `.agents/journals/20260813T161019Z-telemetry-lifecycle-1.patch`. It captures the complete non-journal change batch before publication.
 
+### Assistant
+
+> The commit was created, but the staged whitespace check flagged blank-line artifacts inside the generated sidecar patch. I have not pushed yet. I’m cleaning that generated artifact and will amend the commit so `main` is published with a clean `git diff --check`.
+
+### Assistant
+
+> Commit `ddf7c3c` is now on `origin/main`, and the local branch is clean and synchronized. I’m updating the installed skill from that pushed revision next, validating it in a staging directory before replacing the existing global copy, then running the installed bootstrap to update the managed global instructions.
+
+### Assistant
+
+> The installer helper exposed a root-repository limitation: it copied only top-level files for `--path .`, omitting `scripts/`, `references/`, tests, and metadata. I’m discarding that incomplete staging result and using a shallow Git staging checkout of the already-pushed commit instead; the live installation will not be touched until the complete staged package validates.
+
+### Assistant
+
+> The validated package has replaced the previous global installation, with the old copy retained temporarily as a rollback directory. I’m running the installed validators/tests and its bootstrap now; that bootstrap should update only the managed Agent Dispatch block and increment global instructions from V56 to V57 exactly once.
+
+### Assistant
+
+> The installed tests passed, but reloading global instructions exposed an important consistency bug: the header advanced to V57 while the embedded required commentary string still said V56. I’m fixing the bootstrap so a managed version bump updates both references atomically, adding regression coverage, then I’ll publish a small follow-up commit and rerun the installation. The current global document will end at V58 after that corrective update.
+
+### Assistant
+
+> Repository-journaling sidecar created: `.agents/journals/20260813T161019Z-telemetry-lifecycle-2.patch`. It records the corrective atomic version-reference update and regression test.
+
 ## Patch Files
 
 - `.agents/journals/20260813T161019Z-telemetry-lifecycle-1.patch` — complete non-journal implementation, documentation, metadata, and test diff.
+- `.agents/journals/20260813T161019Z-telemetry-lifecycle-2.patch` — corrective bootstrap version-reference update and regression test.
 
 ## Changes Made
 
@@ -84,6 +109,7 @@ UTC task journal for the Agent Dispatch telemetry lifecycle implementation and p
 - Tightened the managed global Agent Dispatch trigger and added idempotent global instruction version increments when that block changes.
 - Updated the skill instructions, learning reference, README, UI metadata, and standalone validation contract.
 - Expanded deterministic coverage from 12 to 22 tests, including reactivation, failed spawn, duplicate lifecycle events, missing telemetry, runtime reconciliation, unknown usage, rough-message rejection, and bootstrap version idempotence.
+- Made bootstrap version maintenance update both the global header and its mandated commentary marker atomically.
 
 ## Problems Encountered
 
@@ -91,6 +117,7 @@ UTC task journal for the Agent Dispatch telemetry lifecycle implementation and p
 - The first bootstrap version test caught a multiline-regex bug that incremented the global instruction version repeatedly. Restricting the header suffix to horizontal whitespace restored idempotence.
 - Patch edits produced mixed working-tree line endings. All modified text files were normalized back to the repository’s CRLF checkout policy before final verification.
 - Tracking a conventional unified diff caused its blank context prefixes to trip `git diff --check`; the sidecar was regenerated with zero context and validated using `git apply --unidiff-zero --reverse --check`.
+- The first live bootstrap advanced the global header but left the embedded commentary marker stale. Reloading the changed instruction exposed the inconsistency; the bootstrap and regression fixture were corrected before final completion.
 
 ## Lessons
 
@@ -98,3 +125,4 @@ UTC task journal for the Agent Dispatch telemetry lifecycle implementation and p
 - Append-only telemetry needs separate start, bind, and terminal events. Reusing the learner’s terminal event type for provisional records would contaminate routing evidence.
 - Unknown usage is a first-class state, not zero usage, and must remain visible in aggregate reporting.
 - Ledger-only audits cannot discover calls that bypassed registration entirely; runtime agent IDs and expected dispatch counts are necessary reconciliation inputs until the host provides a transactional dispatch hook.
+- Instruction version automation must update every normative self-reference, not only the document header, and the live file must be reloaded after mutation to catch drift.

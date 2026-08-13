@@ -1,0 +1,21 @@
+diff --git a/scripts/bootstrap_agents.py b/scripts/bootstrap_agents.py
+index 697f7f4..817e21f 100644
+--- a/scripts/bootstrap_agents.py
++++ b/scripts/bootstrap_agents.py
+@@ -28 +28,5 @@ def bump_global_version(text: str) -> str:
+-    return text[:match.start()] + f"{match.group(1)}{int(match.group(2)) + 1}" + text[match.end():]
++    old_version = int(match.group(2))
++    new_version = old_version + 1
++    text = text[:match.start()] + f"{match.group(1)}{new_version}" + text[match.end():]
++    commentary = re.compile(r"(Begin every request's commentary with exactly `COMPLYING WITH GLOBAL AGENTS\.MD\nV)" + str(old_version) + r"(`)")
++    return commentary.sub(rf"\g<1>{new_version}\g<2>", text)
+diff --git a/tests/test_dispatch.py b/tests/test_dispatch.py
+index ce0649f..693267c 100644
+--- a/tests/test_dispatch.py
++++ b/tests/test_dispatch.py
+@@ -78 +78 @@ class DispatchTests(unittest.TestCase):
+-            path.write_text("# Global AGENTS.md V10\n\n<!-- agent-dispatch:start -->\nold\n<!-- agent-dispatch:end -->\n")
++            path.write_text("# Global AGENTS.md V10\n\nBegin every request's commentary with exactly `COMPLYING WITH GLOBAL AGENTS.MD\nV10`.\n\n<!-- agent-dispatch:start -->\nold\n<!-- agent-dispatch:end -->\n")
+@@ -80 +80 @@ class DispatchTests(unittest.TestCase):
+-            first=path.read_text();self.assertIn("# Global AGENTS.md V11",first);self.assertIn("pre-spawn receipt",first)
++            first=path.read_text();self.assertIn("# Global AGENTS.md V11",first);self.assertIn("GLOBAL AGENTS.MD\nV11`",first);self.assertIn("pre-spawn receipt",first)
