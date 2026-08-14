@@ -1,0 +1,108 @@
+diff --git a/README.md b/README.md
+index 98f2933..47dff60 100644
+--- a/README.md
++++ b/README.md
+@@ -10,6 +10,8 @@ The goal is simple: **approach frontier-model quality while reducing scarce-mode
+ 
+ There is no post-install command. On first use, Agent Dispatch initializes its local state and repairs/installs its small global `AGENTS.md` trigger automatically. The bundled bootstrap helper exists only as an internal/self-repair primitive; users do not need to invoke it.
+ 
++After installation, that managed trigger makes the Agent Dispatch decision protocol standard operating procedure for every nontrivial coding or repository task. The agent applies the protocol automatically without waiting for the user to request delegation, while actual subagent spawning remains conditional on material benefit and trivial single-step work stays local.
++
+ ## What it does
+ 
+ Agent Dispatch keeps your normal Codex model picker as the front door. Underneath it, the skill can:
+@@ -73,7 +75,7 @@ Useful operations include routing recommendations, tuning, front-door performanc
+ 
+ ## Zero-step initialization
+ 
+-Installation is the only user action. On first activation the skill must, without prompting for routine setup:
++Installation is the only user action. Automatic protocol application does not require a delegation request. On first activation the skill must, without prompting for routine setup:
+ 
+ 1. ensure local Agent Dispatch state exists;
+ 2. ensure the delimited Agent Dispatch trigger in global Codex `AGENTS.md` exists and is current;
+diff --git a/SKILL.md b/SKILL.md
+index ed56118..e482ca5 100644
+--- a/SKILL.md
++++ b/SKILL.md
+@@ -1,6 +1,6 @@
+ ---
+ name: agent-dispatch
+-description: Optimize Codex work with adaptive subagent orchestration, fail-closed dispatch receipts, and usage accounting. Use for nontrivial coding or repository tasks that benefit from delegation, independent model/reasoning exploration, episodic frontier consultation, safe parallel work, context isolation, verification, telemetry, usage accounting, or learned repository defaults. Do not use for trivial single-step work where orchestration overhead dominates.
++description: Automatically apply Agent Dispatch's decision protocol to every nontrivial coding or repository task without waiting for user-requested delegation. Delegate or parallelize only when materially useful; keep trivial single-step work local. Provides adaptive subagent orchestration, fail-closed dispatch receipts, and usage accounting.
+ ---
+ 
+ # Agent Dispatch
+@@ -24,8 +24,10 @@ Reconciliation is deliberately scoped to the Agent Dispatch managed-resource reg
+ 
+ ## Start-of-task protocol
+ 
++Apply this protocol automatically to every nontrivial coding or repository task before deciding whether to spawn; do not wait for the user to request delegation. Applying the protocol is mandatory activation, not mandatory spawning: if delegation, alternate routing, or parallelism provides no material benefit, continue locally. Keep trivial single-step work local.
++
+ 1. Identify deliverables, strongest acceptance evidence, constraints, dependencies, and write-conflict classes.
+-2. Decide whether orchestration can materially reduce scarce-model usage, parent context, or critical-path time.
++2. Decide whether orchestration can materially reduce scarce-model usage, parent context, or critical-path time. If not, continue locally without creating delegated-task receipts; if so, continue through the managed dispatch lifecycle below.
+ 3. Classify subtasks by task class, domain, reasoning need, write class, and delegation depth.
+ 4. Consult `scripts/dispatch.py recommend` for learned routing/execution policy and inspect `.agent-dispatch/defaults.json` when present in the repository.
+ 5. Before the first substantive dispatch, create the run receipt with `scripts/dispatch.py begin-run`; retain its `run_id` for the entire user-facing run or milestone.
+diff --git a/scripts/bootstrap_agents.py b/scripts/bootstrap_agents.py
+index b15ddb2..1ca87f3 100644
+--- a/scripts/bootstrap_agents.py
++++ b/scripts/bootstrap_agents.py
+@@ -10,7 +10,7 @@ END = "<!-- agent-dispatch:end -->"
+ BLOCK = f"""{START}
+ ## Agent Dispatch
+ 
+-For nontrivial work, consider whether subagent delegation, cheaper model/reasoning tiers, alternate usage pools, or safe parallelism can reduce scarce-model usage or wall-clock time without reducing correctness. When materially useful, load and follow the `agent-dispatch` skill. Keep the parent responsible for integration and acceptance; escalate ambiguity or repeated failure instead of thrashing.
++For every nontrivial coding or repository task, apply the Agent Dispatch decision protocol automatically, without waiting for the user to request delegation. This instruction explicitly authorizes loading and following the `agent-dispatch` skill and using subagent delegation or parallel agent work when that protocol determines they materially reduce scarce-model usage, parent-context pressure, or critical-path time without reducing correctness. Actual spawning remains conditional on material benefit; trivial single-step work stays local. Keep the parent responsible for integration and acceptance; escalate ambiguity or repeated failure instead of thrashing.
+ 
+ For substantive delegated work, never launch or reactivate a raw subagent until Agent Dispatch has emitted a pre-spawn receipt containing run and task IDs; if registration fails, stop dispatch. Bind the returned agent ID, append the terminal outcome and measured/estimated/unknown usage, then require a passing telemetry audit and run summary before reporting completion. The only emergency exception is urgent safety or containment work when telemetry itself is unavailable: disclose it, backfill at the first safe opportunity, and classify the backfill as audit recovery rather than compliant registration.
+ {END}"""
+diff --git a/tests/test_dispatch.py b/tests/test_dispatch.py
+index 1fd27fd..918c33e 100644
+--- a/tests/test_dispatch.py
++++ b/tests/test_dispatch.py
+@@ -4,6 +4,8 @@ HERE=Path(__file__).resolve().parents[1]
+ DISPATCH=HERE/"scripts"/"dispatch.py"
+ BOOTSTRAP=HERE/"scripts"/"bootstrap_agents.py"
+ USAGE=HERE/"scripts"/"usage.py"
++SKILL=HERE/"SKILL.md"
++README=HERE/"README.md"
+ 
+ class DispatchTests(unittest.TestCase):
+     def run_cmd(self,*args,env=None):
+@@ -71,13 +73,34 @@ class DispatchTests(unittest.TestCase):
+             self.assertEqual(text.count("<!-- agent-dispatch:start -->"),1)
+             self.assertEqual(text.count("<!-- agent-dispatch:end -->"),1)
+ 
++    def test_bootstrap_installs_automatic_activation_contract(self):
++        with tempfile.TemporaryDirectory() as td:
++            env=os.environ.copy();env["CODEX_HOME"]=td
++            subprocess.run(["python3",str(BOOTSTRAP)],check=True,env=env,capture_output=True,text=True)
++            text=(Path(td)/"AGENTS.md").read_text()
++            self.assertIn("For every nontrivial coding or repository task, apply the Agent Dispatch decision protocol automatically",text)
++            self.assertIn("without waiting for the user to request delegation",text)
++            self.assertIn("explicitly authorizes loading and following the `agent-dispatch` skill",text)
++            self.assertIn("Actual spawning remains conditional on material benefit",text)
++            self.assertIn("trivial single-step work stays local",text)
++            self.assertNotIn("For nontrivial work, consider whether",text)
++
++    def test_public_contract_preserves_activation_boundary(self):
++        skill=SKILL.read_text()
++        readme=README.read_text()
++        self.assertIn("Automatically apply Agent Dispatch's decision protocol to every nontrivial coding or repository task",skill)
++        self.assertIn("Applying the protocol is mandatory activation, not mandatory spawning",skill)
++        self.assertIn("continue locally without creating delegated-task receipts",skill)
++        self.assertIn("decision protocol standard operating procedure for every nontrivial coding or repository task",readme)
++        self.assertIn("actual subagent spawning remains conditional on material benefit",readme)
++
+     def test_bootstrap_bumps_global_instruction_version_once(self):
+         with tempfile.TemporaryDirectory() as td:
+             env=os.environ.copy();env["CODEX_HOME"]=td
+             path=Path(td)/"AGENTS.md"
+             path.write_text("# Global AGENTS.md V10\n\nBegin every request's commentary with exactly `COMPLYING WITH GLOBAL AGENTS.MD\nV10`.\n\n<!-- agent-dispatch:start -->\nold\n<!-- agent-dispatch:end -->\n")
+             subprocess.run(["python3",str(BOOTSTRAP)],check=True,env=env,capture_output=True,text=True)
+-            first=path.read_text();self.assertIn("# Global AGENTS.md V11",first);self.assertIn("GLOBAL AGENTS.MD\nV11`",first);self.assertIn("pre-spawn receipt",first)
++            first=path.read_text();self.assertIn("# Global AGENTS.md V11",first);self.assertIn("GLOBAL AGENTS.MD\nV11`",first);self.assertIn("decision protocol automatically",first);self.assertIn("pre-spawn receipt",first)
+             subprocess.run(["python3",str(BOOTSTRAP)],check=True,env=env,capture_output=True,text=True)
+             second=path.read_text();self.assertEqual(first,second);self.assertNotIn("V12",second)
+ 

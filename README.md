@@ -10,6 +10,8 @@ The goal is simple: **approach frontier-model quality while reducing scarce-mode
 
 There is no post-install command. On first use, Agent Dispatch initializes its local state and repairs/installs its small global `AGENTS.md` trigger automatically. The bundled bootstrap helper exists only as an internal/self-repair primitive; users do not need to invoke it.
 
+After installation, that managed trigger makes the Agent Dispatch decision protocol standard operating procedure for every nontrivial coding or repository task. The agent applies the protocol automatically without waiting for the user to request delegation, while actual subagent spawning remains conditional on material benefit and trivial single-step work stays local.
+
 ## What it does
 
 Agent Dispatch keeps your normal Codex model picker as the front door. Underneath it, the skill can:
@@ -73,7 +75,7 @@ Useful operations include routing recommendations, tuning, front-door performanc
 
 ## Zero-step initialization
 
-Installation is the only user action. On first activation the skill must, without prompting for routine setup:
+Installation is the only user action. Automatic protocol application does not require a delegation request. On first activation the skill must, without prompting for routine setup:
 
 1. ensure local Agent Dispatch state exists;
 2. ensure the delimited Agent Dispatch trigger in global Codex `AGENTS.md` exists and is current;

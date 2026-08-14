@@ -4,6 +4,8 @@ HERE=Path(__file__).resolve().parents[1]
 DISPATCH=HERE/"scripts"/"dispatch.py"
 BOOTSTRAP=HERE/"scripts"/"bootstrap_agents.py"
 USAGE=HERE/"scripts"/"usage.py"
+SKILL=HERE/"SKILL.md"
+README=HERE/"README.md"
 
 class DispatchTests(unittest.TestCase):
     def run_cmd(self,*args,env=None):
@@ -71,13 +73,34 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(text.count("<!-- agent-dispatch:start -->"),1)
             self.assertEqual(text.count("<!-- agent-dispatch:end -->"),1)
 
+    def test_bootstrap_installs_automatic_activation_contract(self):
+        with tempfile.TemporaryDirectory() as td:
+            env=os.environ.copy();env["CODEX_HOME"]=td
+            subprocess.run(["python3",str(BOOTSTRAP)],check=True,env=env,capture_output=True,text=True)
+            text=(Path(td)/"AGENTS.md").read_text()
+            self.assertIn("For every nontrivial coding or repository task, apply the Agent Dispatch decision protocol automatically",text)
+            self.assertIn("without waiting for the user to request delegation",text)
+            self.assertIn("explicitly authorizes loading and following the `agent-dispatch` skill",text)
+            self.assertIn("Actual spawning remains conditional on material benefit",text)
+            self.assertIn("trivial single-step work stays local",text)
+            self.assertNotIn("For nontrivial work, consider whether",text)
+
+    def test_public_contract_preserves_activation_boundary(self):
+        skill=SKILL.read_text()
+        readme=README.read_text()
+        self.assertIn("Automatically apply Agent Dispatch's decision protocol to every nontrivial coding or repository task",skill)
+        self.assertIn("Applying the protocol is mandatory activation, not mandatory spawning",skill)
+        self.assertIn("continue locally without creating delegated-task receipts",skill)
+        self.assertIn("decision protocol standard operating procedure for every nontrivial coding or repository task",readme)
+        self.assertIn("actual subagent spawning remains conditional on material benefit",readme)
+
     def test_bootstrap_bumps_global_instruction_version_once(self):
         with tempfile.TemporaryDirectory() as td:
             env=os.environ.copy();env["CODEX_HOME"]=td
             path=Path(td)/"AGENTS.md"
             path.write_text("# Global AGENTS.md V10\n\nBegin every request's commentary with exactly `COMPLYING WITH GLOBAL AGENTS.MD\nV10`.\n\n<!-- agent-dispatch:start -->\nold\n<!-- agent-dispatch:end -->\n")
             subprocess.run(["python3",str(BOOTSTRAP)],check=True,env=env,capture_output=True,text=True)
-            first=path.read_text();self.assertIn("# Global AGENTS.md V11",first);self.assertIn("GLOBAL AGENTS.MD\nV11`",first);self.assertIn("pre-spawn receipt",first)
+            first=path.read_text();self.assertIn("# Global AGENTS.md V11",first);self.assertIn("GLOBAL AGENTS.MD\nV11`",first);self.assertIn("decision protocol automatically",first);self.assertIn("pre-spawn receipt",first)
             subprocess.run(["python3",str(BOOTSTRAP)],check=True,env=env,capture_output=True,text=True)
             second=path.read_text();self.assertEqual(first,second);self.assertNotIn("V12",second)
 

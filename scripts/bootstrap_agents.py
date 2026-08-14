@@ -10,7 +10,7 @@ END = "<!-- agent-dispatch:end -->"
 BLOCK = f"""{START}
 ## Agent Dispatch
 
-For nontrivial work, consider whether subagent delegation, cheaper model/reasoning tiers, alternate usage pools, or safe parallelism can reduce scarce-model usage or wall-clock time without reducing correctness. When materially useful, load and follow the `agent-dispatch` skill. Keep the parent responsible for integration and acceptance; escalate ambiguity or repeated failure instead of thrashing.
+For every nontrivial coding or repository task, apply the Agent Dispatch decision protocol automatically, without waiting for the user to request delegation. This instruction explicitly authorizes loading and following the `agent-dispatch` skill and using subagent delegation or parallel agent work when that protocol determines they materially reduce scarce-model usage, parent-context pressure, or critical-path time without reducing correctness. Actual spawning remains conditional on material benefit; trivial single-step work stays local. Keep the parent responsible for integration and acceptance; escalate ambiguity or repeated failure instead of thrashing.
 
 For substantive delegated work, never launch or reactivate a raw subagent until Agent Dispatch has emitted a pre-spawn receipt containing run and task IDs; if registration fails, stop dispatch. Bind the returned agent ID, append the terminal outcome and measured/estimated/unknown usage, then require a passing telemetry audit and run summary before reporting completion. The only emergency exception is urgent safety or containment work when telemetry itself is unavailable: disclose it, backfill at the first safe opportunity, and classify the backfill as audit recovery rather than compliant registration.
 {END}"""

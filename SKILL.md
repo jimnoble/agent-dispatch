@@ -1,6 +1,6 @@
 ---
 name: agent-dispatch
-description: Optimize Codex work with adaptive subagent orchestration, fail-closed dispatch receipts, and usage accounting. Use for nontrivial coding or repository tasks that benefit from delegation, independent model/reasoning exploration, episodic frontier consultation, safe parallel work, context isolation, verification, telemetry, usage accounting, or learned repository defaults. Do not use for trivial single-step work where orchestration overhead dominates.
+description: Automatically apply Agent Dispatch's decision protocol to every nontrivial coding or repository task without waiting for user-requested delegation. Delegate or parallelize only when materially useful; keep trivial single-step work local. Provides adaptive subagent orchestration, fail-closed dispatch receipts, and usage accounting.
 ---
 
 # Agent Dispatch
@@ -24,8 +24,10 @@ Reconciliation is deliberately scoped to the Agent Dispatch managed-resource reg
 
 ## Start-of-task protocol
 
+Apply this protocol automatically to every nontrivial coding or repository task before deciding whether to spawn; do not wait for the user to request delegation. Applying the protocol is mandatory activation, not mandatory spawning: if delegation, alternate routing, or parallelism provides no material benefit, continue locally. Keep trivial single-step work local.
+
 1. Identify deliverables, strongest acceptance evidence, constraints, dependencies, and write-conflict classes.
-2. Decide whether orchestration can materially reduce scarce-model usage, parent context, or critical-path time.
+2. Decide whether orchestration can materially reduce scarce-model usage, parent context, or critical-path time. If not, continue locally without creating delegated-task receipts; if so, continue through the managed dispatch lifecycle below.
 3. Classify subtasks by task class, domain, reasoning need, write class, and delegation depth.
 4. Consult `scripts/dispatch.py recommend` for learned routing/execution policy and inspect `.agent-dispatch/defaults.json` when present in the repository.
 5. Before the first substantive dispatch, create the run receipt with `scripts/dispatch.py begin-run`; retain its `run_id` for the entire user-facing run or milestone.
