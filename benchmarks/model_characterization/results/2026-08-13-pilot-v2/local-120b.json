@@ -1,0 +1,166 @@
+{
+  "model": "gpt-oss:120b",
+  "reasoning_effort": "unknown",
+  "results": [
+    {
+      "agent_id": "d35b35d1-0267-4980-859a-268a3cf88428",
+      "duration_ms": 175722,
+      "evaluation": {
+        "score": 1.0,
+        "passed": true,
+        "detail": "exact structured answer"
+      },
+      "metadata": {
+        "model_digest": null,
+        "ollama_version": null,
+        "schema_valid": true
+      },
+      "provider_duration_ms": 175538,
+      "response": {
+        "analysis_summary": "Extracted active records and grouped IDs by team with alphabetical keys and ascending ID arrays.",
+        "evidence": [
+          "id=1 team=beta active=true",
+          "id=2 team=alpha active=true",
+          "id=5 team=alpha active=true"
+        ],
+        "recommendation": "{\"alpha\":[2,5],\"beta\":[1]}",
+        "should_escalate": false,
+        "uncertainties": []
+      },
+      "task_id": "structured-extraction",
+      "usage": {
+        "cached_input_tokens": 0,
+        "input_tokens": 397,
+        "output_tokens": 86
+      }
+    },
+    {
+      "agent_id": "874060bf-f0d9-4d91-b59d-4896887cdedf",
+      "duration_ms": 14168,
+      "evaluation": {
+        "score": 1.0,
+        "passed": true,
+        "detail": "exact normalized answer"
+      },
+      "metadata": {
+        "model_digest": null,
+        "ollama_version": null,
+        "schema_valid": true
+      },
+      "provider_duration_ms": 14009,
+      "response": {
+        "analysis_summary": "Computed parallel topological layers based on dependencies.",
+        "evidence": [
+          "Tasks A, B, C have no dependencies \u00e2\u2020\u2019 first layer.",
+          "Task D depends on A and B; Task E depends on B and C \u00e2\u2020\u2019 second layer after A, B, C are complete.",
+          "Task F depends on D and E \u00e2\u2020\u2019 third layer after D and E are complete."
+        ],
+        "recommendation": "A,B,C|D,E|F",
+        "should_escalate": false,
+        "uncertainties": []
+      },
+      "task_id": "dependency-planning",
+      "usage": {
+        "cached_input_tokens": 0,
+        "input_tokens": 389,
+        "output_tokens": 120
+      }
+    },
+    {
+      "agent_id": "cd23207f-6760-4fd0-8575-603573a7273a",
+      "duration_ms": 15782,
+      "evaluation": {
+        "score": 1.0,
+        "passed": true,
+        "detail": "exact normalized answer"
+      },
+      "metadata": {
+        "model_digest": null,
+        "ollama_version": null,
+        "schema_valid": true
+      },
+      "provider_duration_ms": 15613,
+      "response": {
+        "analysis_summary": "The bug is resetting the seen set each iteration; should add to it.",
+        "evidence": [
+          "Current code overwrites seen with a new set containing only the current value, preventing detection of duplicates."
+        ],
+        "recommendation": "seen.add(value)",
+        "should_escalate": false,
+        "uncertainties": []
+      },
+      "task_id": "debugging-diagnosis",
+      "usage": {
+        "cached_input_tokens": 0,
+        "input_tokens": 460,
+        "output_tokens": 83
+      }
+    },
+    {
+      "agent_id": "45f2f17f-0594-419a-ade6-4990587bfbbb",
+      "duration_ms": 180039,
+      "evaluation": {
+        "score": 0.0,
+        "passed": false,
+        "detail": "response schema invalid"
+      },
+      "metadata": {
+        "status": "failed",
+        "timeout_ms": 180000
+      },
+      "provider_duration_ms": 180039,
+      "response": {},
+      "task_id": "code-synthesis",
+      "usage": {
+        "cached_input_tokens": null,
+        "input_tokens": null,
+        "output_tokens": null
+      }
+    },
+    {
+      "agent_id": "44affac4-6f74-4e67-856d-028110323b28",
+      "duration_ms": 180026,
+      "evaluation": {
+        "score": 0.0,
+        "passed": false,
+        "detail": "response schema invalid"
+      },
+      "metadata": {
+        "status": "failed",
+        "timeout_ms": 180000
+      },
+      "provider_duration_ms": 180026,
+      "response": {},
+      "task_id": "data-aggregation",
+      "usage": {
+        "cached_input_tokens": null,
+        "input_tokens": null,
+        "output_tokens": null
+      }
+    }
+  ],
+  "unscored_attempts": [
+    {
+      "agent_id": "0d273d4f-0587-4b6e-b644-0b0e38b2a30a",
+      "duration_ms": 101258,
+      "metadata": {
+        "status": "proposed",
+        "reason": "completed after circuit-breaker termination; response unavailable to scorer"
+      },
+      "task_id": "contract-review",
+      "usage": {
+        "cached_input_tokens": 0,
+        "input_tokens": 701,
+        "output_tokens": 188
+      }
+    }
+  ],
+  "route": "local-120b",
+  "schema": 1,
+  "suite": "agent-dispatch-model-characterization-v1",
+  "summary": {
+    "tasks": 5,
+    "passed": 3,
+    "mean_score": 0.6
+  }
+}

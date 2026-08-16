@@ -1,0 +1,36 @@
+{
+  "model": "gpt-5.6-luna",
+  "reasoning_effort": "low",
+  "results": [
+    {
+      "agent_id": null,
+      "duration_ms": 0,
+      "evaluation": {
+        "detail": "execution failure: For more information, try '--help'.",
+        "passed": false,
+        "score": 0.0
+      },
+      "metadata": {},
+      "provider_duration_ms": null,
+      "response": {},
+      "task_id": "structured-extraction",
+      "usage": {
+        "cached_input_tokens": null,
+        "input_tokens": null,
+        "output_tokens": null
+      }
+    }
+  ],
+  "route": "luna-low",
+  "schema": 1,
+  "suite": "agent-dispatch-model-characterization-v1",
+  "summary": {
+    "cached_input_tokens": 0,
+    "input_tokens": 0,
+    "mean_score": 0.0,
+    "output_tokens": 0,
+    "passed": 0,
+    "tasks": 1,
+    "wall_time_ms": 0
+  }
+}

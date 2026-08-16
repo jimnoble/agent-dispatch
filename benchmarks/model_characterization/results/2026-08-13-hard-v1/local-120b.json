@@ -1,0 +1,113 @@
+{
+  "model": "gpt-oss:120b",
+  "reasoning_effort": "unknown",
+  "results": [
+    {
+      "agent_id": "1ef0c51c-ea7c-4f4c-855e-6fe53e92f009",
+      "duration_ms": 85108,
+      "evaluation": {
+        "detail": "exact structured answer",
+        "passed": true,
+        "score": 1.0
+      },
+      "metadata": {
+        "context_window": 8192,
+        "execution_profile": "gpt-oss-120b",
+        "model_digest": null,
+        "ollama_version": null,
+        "scheduler_wait_ms": 0,
+        "schema_valid": true,
+        "timeout_ms": 600000
+      },
+      "provider_duration_ms": 84934,
+      "response": {
+        "analysis_summary": "Processed events with idempotency and fund checks. Applied IDs: e1, e2, e3, e5. Rejected due to insufficient funds: e4. Final balances A=8, B=5.",
+        "evidence": [],
+        "recommendation": "{\"applied\":[\"e1\",\"e2\",\"e3\",\"e5\"],\"balances\":{\"A\":8,\"B\":5},\"rejected\":[\"e4\"]}",
+        "should_escalate": false,
+        "uncertainties": []
+      },
+      "task_id": "hard-event-replay",
+      "usage": {
+        "cached_input_tokens": 0,
+        "input_tokens": 980,
+        "output_tokens": 112
+      }
+    },
+    {
+      "agent_id": null,
+      "duration_ms": 0,
+      "evaluation": {
+        "detail": "execution failure: local-reasoning invoke returned exit code 1",
+        "passed": false,
+        "score": 0.0
+      },
+      "metadata": {},
+      "provider_duration_ms": null,
+      "response": {},
+      "task_id": "hard-critical-path",
+      "usage": {
+        "cached_input_tokens": null,
+        "input_tokens": null,
+        "output_tokens": null
+      }
+    },
+    {
+      "agent_id": null,
+      "duration_ms": 0,
+      "evaluation": {
+        "detail": "execution failure: local-reasoning invoke returned exit code 1",
+        "passed": false,
+        "score": 0.0
+      },
+      "metadata": {},
+      "provider_duration_ms": null,
+      "response": {},
+      "task_id": "hard-transactional-review",
+      "usage": {
+        "cached_input_tokens": null,
+        "input_tokens": null,
+        "output_tokens": null
+      }
+    },
+    {
+      "agent_id": null,
+      "duration_ms": 0,
+      "evaluation": {
+        "detail": "execution failure: local-reasoning invoke returned exit code 1",
+        "passed": false,
+        "score": 0.0
+      },
+      "metadata": {},
+      "provider_duration_ms": null,
+      "response": {},
+      "task_id": "hard-interval-coalescing",
+      "usage": {
+        "cached_input_tokens": null,
+        "input_tokens": null,
+        "output_tokens": null
+      }
+    },
+    {
+      "agent_id": null,
+      "duration_ms": 0,
+      "evaluation": {
+        "detail": "execution failure: local-reasoning invoke returned exit code 1",
+        "passed": false,
+        "score": 0.0
+      },
+      "metadata": {},
+      "provider_duration_ms": null,
+      "response": {},
+      "task_id": "hard-weighted-slo",
+      "usage": {
+        "cached_input_tokens": null,
+        "input_tokens": null,
+        "output_tokens": null
+      }
+    }
+  ],
+  "route": "local-120b",
+  "schema": 1,
+  "suite": "agent-dispatch-model-characterization-hard-v2"
+}

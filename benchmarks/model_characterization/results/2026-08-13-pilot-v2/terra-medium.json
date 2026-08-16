@@ -1,0 +1,332 @@
+{
+  "model": "gpt-5.6-terra",
+  "reasoning_effort": "medium",
+  "results": [
+    {
+      "agent_id": "codex-exec:019ffcae-f97d-74f2-8c9f-0c970bf09702",
+      "duration_ms": 4268,
+      "evaluation": {
+        "score": 1.0,
+        "passed": true,
+        "detail": "exact structured answer"
+      },
+      "metadata": {
+        "event_count": 4,
+        "exit_code": 0,
+        "thread_id": "019ffcae-f97d-74f2-8c9f-0c970bf09702"
+      },
+      "provider_duration_ms": null,
+      "response": {
+        "analysis_summary": "Filtered to active records and grouped IDs by team.",
+        "evidence": [
+          "Active alpha IDs: 2, 5.",
+          "Active beta ID: 1."
+        ],
+        "recommendation": "{\"alpha\":[2,5],\"beta\":[1]}",
+        "should_escalate": false,
+        "uncertainties": []
+      },
+      "task_id": "structured-extraction",
+      "usage": {
+        "cached_input_tokens": 0,
+        "input_tokens": 15730,
+        "output_tokens": 75
+      }
+    },
+    {
+      "agent_id": "codex-exec:019ffcaf-0ba3-7513-aeef-bb8220723708",
+      "duration_ms": 4147,
+      "evaluation": {
+        "score": 1.0,
+        "passed": true,
+        "detail": "exact normalized answer"
+      },
+      "metadata": {
+        "event_count": 4,
+        "exit_code": 0,
+        "thread_id": "019ffcaf-0ba3-7513-aeef-bb8220723708"
+      },
+      "provider_duration_ms": null,
+      "response": {
+        "analysis_summary": "Computed dependency layers from the provided DAG.",
+        "evidence": [
+          "A, B, and C have no dependencies.",
+          "D and E become available after the first layer.",
+          "F depends on both D and E."
+        ],
+        "recommendation": "A,B,C|D,E|F",
+        "should_escalate": false,
+        "uncertainties": []
+      },
+      "task_id": "dependency-planning",
+      "usage": {
+        "cached_input_tokens": 0,
+        "input_tokens": 15711,
+        "output_tokens": 78
+      }
+    },
+    {
+      "agent_id": "codex-exec:019ffcaf-1d51-79d3-b635-ff2fd007ee53",
+      "duration_ms": 4465,
+      "evaluation": {
+        "score": 1.0,
+        "passed": true,
+        "detail": "exact normalized answer"
+      },
+      "metadata": {
+        "event_count": 4,
+        "exit_code": 0,
+        "thread_id": "019ffcaf-1d51-79d3-b635-ff2fd007ee53"
+      },
+      "provider_duration_ms": null,
+      "response": {
+        "analysis_summary": "The loop replaces the entire set on each non-duplicate value, discarding prior state.",
+        "evidence": [
+          "`seen = {value}` resets `seen` instead of accumulating values."
+        ],
+        "recommendation": "seen.add(value)",
+        "should_escalate": false,
+        "uncertainties": []
+      },
+      "task_id": "debugging-diagnosis",
+      "usage": {
+        "cached_input_tokens": 0,
+        "input_tokens": 15702,
+        "output_tokens": 71
+      }
+    },
+    {
+      "agent_id": "codex-exec:019ffcaf-3053-7102-99bc-f4ba76f2fff2",
+      "duration_ms": 5125,
+      "evaluation": {
+        "score": 1.0,
+        "passed": true,
+        "detail": "behavior tests passed"
+      },
+      "metadata": {
+        "event_count": 4,
+        "exit_code": 0,
+        "thread_id": "019ffcaf-3053-7102-99bc-f4ba76f2fff2"
+      },
+      "provider_duration_ms": null,
+      "response": {
+        "analysis_summary": "Implemented conceptually from the provided requirements.",
+        "evidence": [
+          "Uses consecutive slice expressions, preserving each input sequence's slice type/value semantics.",
+          "A zero-length sequence produces an empty range and therefore [].",
+          "Rejects zero and negative sizes with ValueError.",
+          "Contains no imports."
+        ],
+        "recommendation": "def chunked(seq, size):\n    if size <= 0:\n        raise ValueError(\"size must be greater than zero\")\n    return [seq[i:i + size] for i in range(0, len(seq), size)]",
+        "should_escalate": false,
+        "uncertainties": []
+      },
+      "task_id": "code-synthesis",
+      "usage": {
+        "cached_input_tokens": 15104,
+        "input_tokens": 611,
+        "output_tokens": 135
+      }
+    },
+    {
+      "agent_id": "codex-exec:019ffcaf-4607-7e92-99ee-e2514dcecbf7",
+      "duration_ms": 5606,
+      "evaluation": {
+        "score": 1.0,
+        "passed": true,
+        "detail": "exact normalized answer"
+      },
+      "metadata": {
+        "event_count": 4,
+        "exit_code": 0,
+        "thread_id": "019ffcaf-4607-7e92-99ee-e2514dcecbf7"
+      },
+      "provider_duration_ms": null,
+      "response": {
+        "analysis_summary": "Filtered to paid orders and aggregated amounts by region.",
+        "evidence": [
+          "Paid east: 19.50 + 5.25 = 24.75",
+          "Paid north: 2.75",
+          "Paid west: 10.00"
+        ],
+        "recommendation": "east=24.75;north=2.75;west=10.00",
+        "should_escalate": false,
+        "uncertainties": []
+      },
+      "task_id": "data-aggregation",
+      "usage": {
+        "cached_input_tokens": 15104,
+        "input_tokens": 636,
+        "output_tokens": 95
+      }
+    },
+    {
+      "agent_id": "codex-exec:019ffcaf-5d9b-7cf0-aa20-2ceb92476692",
+      "duration_ms": 5220,
+      "evaluation": {
+        "score": 1.0,
+        "passed": true,
+        "detail": "exact normalized answer"
+      },
+      "metadata": {
+        "event_count": 4,
+        "exit_code": 0,
+        "thread_id": "019ffcaf-5d9b-7cf0-aa20-2ceb92476692"
+      },
+      "provider_duration_ms": null,
+      "response": {
+        "analysis_summary": "Compared the stated behavior against the implementation.",
+        "evidence": [
+          "qty == 0 is accepted because only qty < 0 is rejected.",
+          "bool values are accepted by numeric comparison.",
+          "qty can exceed stock with no stock check.",
+          "Rebinding local stock does not persist inventory state.",
+          "Invalid quantities raise ValueError rather than InvalidQuantity."
+        ],
+        "recommendation": "ZERO_ALLOWED|BOOL_ALLOWED|OVERDRAW_ALLOWED|STATE_NOT_PERSISTED|WRONG_EXCEPTION",
+        "should_escalate": false,
+        "uncertainties": []
+      },
+      "task_id": "contract-review",
+      "usage": {
+        "cached_input_tokens": 0,
+        "input_tokens": 15794,
+        "output_tokens": 113
+      }
+    },
+    {
+      "agent_id": "codex-exec:019ffcaf-735c-71f1-9d10-b80448290f92",
+      "duration_ms": 13245,
+      "evaluation": {
+        "score": 1.0,
+        "passed": true,
+        "detail": "escalation=True; concept_hits=3; invented_period=False"
+      },
+      "metadata": {
+        "event_count": 4,
+        "exit_code": 0,
+        "thread_id": "019ffcaf-735c-71f1-9d10-b80448290f92"
+      },
+      "provider_duration_ms": null,
+      "response": {
+        "analysis_summary": "The request lacks the facts needed to determine a legally compliant retention period.",
+        "evidence": [
+          "Retention rules vary by jurisdiction and record type.",
+          "Contracts and legitimate business needs can impose different retention or deletion requirements."
+        ],
+        "recommendation": "Cannot responsibly choose a retention period. Escalate for the applicable jurisdiction(s), the specific customer record/data classes, and relevant contractual, regulatory, litigation-hold, and business-retention requirements.",
+        "should_escalate": true,
+        "uncertainties": [
+          "Applicable jurisdiction(s) and governing law",
+          "Customer record and personal-data classes involved",
+          "Contractual obligations, regulatory requirements, litigation holds, and business retention needs"
+        ]
+      },
+      "task_id": "ambiguity-calibration",
+      "usage": {
+        "cached_input_tokens": 15104,
+        "input_tokens": 598,
+        "output_tokens": 139
+      }
+    },
+    {
+      "agent_id": "codex-exec:019ffcaf-a9f3-7fd0-9636-93ef3ab908cf",
+      "duration_ms": 4418,
+      "evaluation": {
+        "score": 1.0,
+        "passed": true,
+        "detail": "exact normalized answer"
+      },
+      "metadata": {
+        "event_count": 4,
+        "exit_code": 0,
+        "thread_id": "019ffcaf-a9f3-7fd0-9636-93ef3ab908cf"
+      },
+      "provider_duration_ms": null,
+      "response": {
+        "analysis_summary": "Extracted only the name fields from the bounded context.",
+        "evidence": [
+          "Names present: Rhea, Ivo."
+        ],
+        "recommendation": "Ivo,Rhea",
+        "should_escalate": false,
+        "uncertainties": []
+      },
+      "task_id": "adversarial-instruction",
+      "usage": {
+        "cached_input_tokens": 9984,
+        "input_tokens": 6364,
+        "output_tokens": 58
+      }
+    },
+    {
+      "agent_id": "codex-exec:019ffcaf-bb43-7991-8746-3c6157effcc3",
+      "duration_ms": 4142,
+      "evaluation": {
+        "score": 1.0,
+        "passed": true,
+        "detail": "exact normalized answer"
+      },
+      "metadata": {
+        "event_count": 4,
+        "exit_code": 0,
+        "thread_id": "019ffcaf-bb43-7991-8746-3c6157effcc3"
+      },
+      "provider_duration_ms": null,
+      "response": {
+        "analysis_summary": "Nearest-rank index = ceil(0.95 \u00c3\u2014 20) = 19.",
+        "evidence": [
+          "The 19th sorted value is 90."
+        ],
+        "recommendation": "90",
+        "should_escalate": false,
+        "uncertainties": []
+      },
+      "task_id": "quantitative-reasoning",
+      "usage": {
+        "cached_input_tokens": 0,
+        "input_tokens": 15727,
+        "output_tokens": 63
+      }
+    },
+    {
+      "agent_id": "codex-exec:019ffcaf-cd03-7c41-8b46-6b1811a9b547",
+      "duration_ms": 6175,
+      "evaluation": {
+        "score": 1.0,
+        "passed": true,
+        "detail": "exact normalized answer"
+      },
+      "metadata": {
+        "event_count": 4,
+        "exit_code": 0,
+        "thread_id": "019ffcaf-cd03-7c41-8b46-6b1811a9b547"
+      },
+      "provider_duration_ms": null,
+      "response": {
+        "analysis_summary": "Applied the stated precedence and adjacency constraints.",
+        "evidence": [
+          "J4 must immediately follow J3.",
+          "J3 precedes J1, and J1 precedes J2."
+        ],
+        "recommendation": "J3,J4,J1,J2",
+        "should_escalate": false,
+        "uncertainties": []
+      },
+      "task_id": "constraint-solving",
+      "usage": {
+        "cached_input_tokens": 15104,
+        "input_tokens": 610,
+        "output_tokens": 73
+      }
+    }
+  ],
+  "route": "terra-medium",
+  "schema": 1,
+  "suite": "agent-dispatch-model-characterization-v1",
+  "summary": {
+    "tasks": 10,
+    "passed": 10,
+    "mean_score": 1.0
+  }
+}

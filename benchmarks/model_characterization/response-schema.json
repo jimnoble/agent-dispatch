@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "analysis_summary": { "type": "string" },
+    "recommendation": { "type": "string" },
+    "evidence": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "uncertainties": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "should_escalate": { "type": "boolean" }
+  },
+  "required": [
+    "analysis_summary",
+    "recommendation",
+    "evidence",
+    "uncertainties",
+    "should_escalate"
+  ]
+}

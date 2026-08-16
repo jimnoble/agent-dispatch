@@ -1,0 +1,50 @@
+{
+  "model": "gpt-oss:20b",
+  "reasoning_effort": "unknown",
+  "results": [
+    {
+      "agent_id": "9021c1e2-f8eb-47a0-9c4c-343a5c78fd2f",
+      "duration_ms": 2587,
+      "evaluation": {
+        "detail": "scoring error: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)",
+        "passed": false,
+        "score": 0.0
+      },
+      "metadata": {
+        "model_digest": null,
+        "ollama_version": null,
+        "schema_valid": true
+      },
+      "provider_duration_ms": 2417,
+      "response": {
+        "analysis_summary": "Extracted active records (ids 1,2,5). Grouped by team: alpha->[2,5], beta->[1]. Sorted keys alphabetically. No escalation needed.",
+        "evidence": [
+          "id=1 team=beta active=true",
+          "id=2 team=alpha active=true",
+          "id=5 team=alpha active=true"
+        ],
+        "recommendation": "{",
+        "should_escalate": false,
+        "uncertainties": []
+      },
+      "task_id": "structured-extraction",
+      "usage": {
+        "cached_input_tokens": 0,
+        "input_tokens": 579,
+        "output_tokens": 99
+      }
+    }
+  ],
+  "route": "local-20b",
+  "schema": 1,
+  "suite": "agent-dispatch-model-characterization-v1",
+  "summary": {
+    "cached_input_tokens": 0,
+    "input_tokens": 579,
+    "mean_score": 0.0,
+    "output_tokens": 99,
+    "passed": 0,
+    "tasks": 1,
+    "wall_time_ms": 2587
+  }
+}
